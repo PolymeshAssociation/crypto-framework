@@ -67,7 +67,11 @@ pub fn process_issue_asset(
 
     // Calculate the pending
     let calc_pending_state_timer = Instant::now();
-    let ordering_state = last_ordering_state(issuer.clone(), db_dir.clone())?;
+    let ordering_state = last_ordering_state(
+        issuer.clone(),
+        issuer_account.pblc.memo.last_processed_tx_counter,
+        db_dir.clone(),
+    )?;
     let next_pending_tx_counter = ordering_state.last_pending_tx_counter + 1;
 
     timing!(

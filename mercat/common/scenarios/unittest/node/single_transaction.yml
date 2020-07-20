@@ -17,6 +17,7 @@ transactions:
   - sequence:
     - validate # This validates the account creations. Can be done automatically without needing to write it here explicitly.
     - Alice 50 ACME Mike approve
+    - validate # without this, the account is not deposited at the time of the next transaction
     - Alice 30 ACME Bob approve Mike approve
     - validate
 

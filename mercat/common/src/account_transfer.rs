@@ -74,7 +74,8 @@ pub fn process_create_tx(
     let calc_pending_state_timer = Instant::now();
     let last_processed_tx_counter = sender_account.pblc.memo.last_processed_tx_counter;
     let last_processed_account_balance = sender_account.pblc.enc_balance;
-    let ordering_state = last_ordering_state(sender.clone(), db_dir.clone())?;
+    let ordering_state =
+        last_ordering_state(sender.clone(), last_processed_tx_counter, db_dir.clone())?;
 
     let pending_balance = compute_enc_pending_balance(
         &sender,
@@ -223,7 +224,11 @@ pub fn process_finalize_tx(
 
     // Calculate the pending
     let calc_pending_state_timer = Instant::now();
-    let ordering_state = last_ordering_state(receiver, db_dir.clone())?;
+    let ordering_state = last_ordering_state(
+        receiver,
+        receiver_account.pblc.memo.last_processed_tx_counter,
+        db_dir.clone(),
+    )?;
     let next_pending_tx_counter = ordering_state.last_pending_tx_counter + 1;
 
     timing!(

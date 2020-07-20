@@ -1,8 +1,9 @@
 use crate::{
     account_create_transaction_file, all_unverified_tx_files, asset_transaction_file,
     confidential_transaction_file, errors::Error, get_asset_ids, get_user_ticker_from, load_object,
-    load_tx_file, parse_tx_name, save_object, user_public_account_file, CTXInstruction,
-    CoreTransaction, Instruction, COMMON_OBJECTS_DIR, MEDIATOR_PUBLIC_ACCOUNT_FILE, ON_CHAIN_DIR,
+    load_tx_file, parse_tx_name, save_object, save_to_file, user_public_account_file,
+    CTXInstruction, CoreTransaction, Instruction, COMMON_OBJECTS_DIR, LAST_VALIDATED_TX_ID_FILE,
+    MEDIATOR_PUBLIC_ACCOUNT_FILE, OFF_CHAIN_DIR, ON_CHAIN_DIR,
 };
 use codec::{Decode, Encode};
 use cryptography::mercat::{
@@ -10,7 +11,7 @@ use cryptography::mercat::{
     AccountCreatorVerifier, AccountMemo, AssetTransactionVerifier, AssetTxState, JustifiedAssetTx,
     JustifiedTx, PubAccount, PubAccountTx, TransactionVerifier, TxState, TxSubstate,
 };
-use log::info;
+use log::{debug, info};
 use metrics::timing;
 use rand::rngs::OsRng;
 use std::{path::PathBuf, time::Instant};
@@ -31,6 +32,8 @@ fn load_all_unverified_and_ready(db_dir: PathBuf) -> Result<Vec<CoreTransaction>
 
 pub fn validate_all_pending(db_dir: PathBuf) -> Result<(), Error> {
     let all_unverified_and_ready = load_all_unverified_and_ready(db_dir.clone())?;
+    let mut last_tx_id: i32 = -1;
+    debug!("----> Read all the unverified transactions!");
     // For each of them call the validate function and process as needed
     for tx in all_unverified_and_ready {
         match tx {
@@ -40,6 +43,7 @@ pub fn validate_all_pending(db_dir: PathBuf) -> Result<(), Error> {
                 mediator,
             } => {
                 validate_asset_issuance(db_dir.clone(), issue_tx, mediator, tx_id)?;
+                last_tx_id = std::cmp::max(last_tx_id, tx_id as i32);
             }
             CoreTransaction::TransferJustify {
                 tx,
@@ -47,9 +51,11 @@ pub fn validate_all_pending(db_dir: PathBuf) -> Result<(), Error> {
                 mediator,
             } => {
                 validate_transaction(db_dir.clone(), tx, mediator, tx_id)?;
+                last_tx_id = std::cmp::max(last_tx_id, tx_id as i32);
             }
-            CoreTransaction::Account(account_tx) => {
+            CoreTransaction::Account { account_tx, tx_id } => {
                 validate_account(db_dir.clone(), account_tx.content.pub_account.id)?;
+                last_tx_id = std::cmp::max(last_tx_id, tx_id as i32);
             }
             _ => {
                 return Err(Error::TransactionIsNotReadyForValidation { tx });
@@ -59,6 +65,13 @@ pub fn validate_all_pending(db_dir: PathBuf) -> Result<(), Error> {
 
     // TODO capture the updated account from each of the above calls, then decide about the final state of the account
 
+    save_to_file(
+        db_dir,
+        OFF_CHAIN_DIR,
+        COMMON_OBJECTS_DIR,
+        LAST_VALIDATED_TX_ID_FILE,
+        &last_tx_id,
+    )?;
     Ok(())
 }
 
@@ -246,7 +259,7 @@ pub fn validate_transaction(
         db_dir.clone(),
         ON_CHAIN_DIR,
         COMMON_OBJECTS_DIR,
-        &confidential_transaction_file(tx_id, &sender, state),
+        &confidential_transaction_file(tx_id, &mediator, state),
     )?;
 
     let mediator_account: AccountMemo = load_object(

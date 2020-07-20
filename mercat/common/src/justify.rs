@@ -16,7 +16,7 @@ use cryptography::{
 };
 use curve25519_dalek::scalar::Scalar;
 use lazy_static::lazy_static;
-use log::info;
+use log::{debug, info};
 use metrics::timing;
 use rand::{CryptoRng, RngCore};
 use schnorrkel::{context::SigningContext, signing_context, ExpansionMode, MiniSecretKey};
@@ -291,9 +291,8 @@ pub fn justify_asset_transaction(
 
     // Justification.
     let justify_library_timer = Instant::now();
-    let mediator = CtxMediator {};
     let asset_id = asset_id_from_ticker(&ticker).map_err(|error| Error::LibraryError { error })?;
-    let mut justified_tx = mediator
+    let mut justified_tx = CtxMediator {}
         .justify_transaction(
             asset_tx.clone(),
             &mediator_account.encryption_key,
@@ -359,7 +358,7 @@ pub fn justify_asset_transaction(
             db_dir,
             ON_CHAIN_DIR,
             COMMON_OBJECTS_DIR,
-            &confidential_transaction_file(tx_id, &sender, new_state),
+            &confidential_transaction_file(tx_id, &mediator, new_state),
             &next_instruction,
         )?;
     }
