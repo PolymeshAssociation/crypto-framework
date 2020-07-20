@@ -1,63 +1,93 @@
 use crate::{
-    asset_transaction_file, confidential_transaction_file, errors::Error, get_asset_ids,
-    load_object, save_object, CTXInstruction, Instruction, ON_CHAIN_DIR, PUBLIC_ACCOUNT_FILE,
-    VALIDATED_PUBLIC_ACCOUNT_FILE,
+    account_create_transaction_file, all_unverified_tx_files, asset_transaction_file,
+    confidential_transaction_file, errors::Error, get_asset_ids, get_user_ticker_from, load_object,
+    load_tx_file, parse_tx_name, save_object, user_public_account_file, CTXInstruction,
+    CoreTransaction, Instruction, COMMON_OBJECTS_DIR, MEDIATOR_PUBLIC_ACCOUNT_FILE, ON_CHAIN_DIR,
 };
-use codec::Decode;
+use codec::{Decode, Encode};
 use cryptography::mercat::{
     account::AccountValidator, asset::AssetValidator, transaction::TransactionValidator,
     AccountCreatorVerifier, AccountMemo, AssetTransactionVerifier, AssetTxState, JustifiedAssetTx,
-    JustifiedTx, PubAccount, TransactionVerifier, TxState, TxSubstate,
+    JustifiedTx, PubAccount, PubAccountTx, TransactionVerifier, TxState, TxSubstate,
 };
+use log::info;
 use metrics::timing;
 use rand::rngs::OsRng;
 use std::{path::PathBuf, time::Instant};
 
-fn process_asset_issuance(
-    instruction: Instruction,
-    mdtr_account: &AccountMemo,
-    issr_pub_account: PubAccount,
-) -> Result<PubAccount, Error> {
-    let tx = JustifiedAssetTx::decode(&mut &instruction.data[..]).unwrap();
-    let validator = AssetValidator {};
-    let updated_issuer_account = validator
-        .verify_asset_transaction(
-            &tx,
-            issr_pub_account,
-            &mdtr_account.owner_enc_pub_key,
-            &mdtr_account.owner_sign_pub_key,
-        )
-        .map_err(|error| Error::LibraryError { error })?;
+fn load_all_unverified_and_ready(db_dir: PathBuf) -> Result<Vec<CoreTransaction>, Error> {
+    all_unverified_tx_files(db_dir)?
+        .into_iter()
+        .map(|tx| parse_tx_name(tx))
+        .map(|res| match res {
+            Err(error) => Err(error),
+            Ok((tx_id, user, state, tx_file_path)) => {
+                load_tx_file(tx_id, user, state, tx_file_path)
+            }
+        })
+        .filter(|res| res.is_err() || res.as_ref().unwrap().is_ready_for_validation())
+        .collect()
+}
 
-    Ok(updated_issuer_account)
+pub fn validate_all_pending(db_dir: PathBuf) -> Result<(), Error> {
+    let all_unverified_and_ready = load_all_unverified_and_ready(db_dir.clone())?;
+    // For each of them call the validate function and process as needed
+    for tx in all_unverified_and_ready {
+        match tx {
+            CoreTransaction::IssueJustify {
+                issue_tx,
+                tx_id,
+                mediator,
+            } => {
+                validate_asset_issuance(db_dir.clone(), issue_tx, mediator, tx_id)?;
+            }
+            CoreTransaction::TransferJustify {
+                tx,
+                tx_id,
+                mediator,
+            } => {
+                validate_transaction(db_dir.clone(), tx, mediator, tx_id)?;
+            }
+            CoreTransaction::Account(account_tx) => {
+                validate_account(db_dir.clone(), account_tx.content.pub_account.id)?;
+            }
+            _ => {
+                return Err(Error::TransactionIsNotReadyForValidation { tx });
+            }
+        }
+    }
+
+    // TODO capture the updated account from each of the above calls, then decide about the final state of the account
+
+    Ok(())
 }
 
 pub fn validate_asset_issuance(
     db_dir: PathBuf,
-    issuer: String,
+    asset_tx: JustifiedAssetTx,
     mediator: String,
     tx_id: u32,
-    ticker: String,
 ) -> Result<(), Error> {
     let load_objects_timer = Instant::now();
 
-    let state = AssetTxState::Justification(TxSubstate::Started);
-
-    let mut instruction: Instruction = load_object(
+    let issuer_account_id = asset_tx.content.content.account_id;
+    let (issuer, ticker, _) = get_user_ticker_from(issuer_account_id, db_dir.clone())?;
+    info!(
+        "Validating asset issuance{{tx_id: {}, issuer: {}, ticker: {}, mediator: {}}}",
+        tx_id, issuer, ticker, mediator
+    );
+    let mediator_account: AccountMemo = load_object(
         db_dir.clone(),
         ON_CHAIN_DIR,
-        &issuer,
-        &asset_transaction_file(tx_id, state),
+        &mediator,
+        MEDIATOR_PUBLIC_ACCOUNT_FILE,
     )?;
-
-    let mediator_account: AccountMemo =
-        load_object(db_dir.clone(), ON_CHAIN_DIR, &mediator, PUBLIC_ACCOUNT_FILE)?;
 
     let issuer_account: PubAccount = load_object(
         db_dir.clone(),
         ON_CHAIN_DIR,
         &issuer,
-        &format!("{}_{}", ticker, VALIDATED_PUBLIC_ACCOUNT_FILE),
+        &user_public_account_file(&ticker),
     )?;
     timing!(
         "validator.issuance.load_objects",
@@ -66,8 +96,16 @@ pub fn validate_asset_issuance(
     );
 
     let validate_issuance_transaction_timer = Instant::now();
-    let updated_issuer_account =
-        process_asset_issuance(instruction.clone(), &mediator_account, issuer_account)?;
+
+    let validator = AssetValidator {};
+    let updated_issuer_account = validator
+        .verify_asset_transaction(
+            &asset_tx,
+            issuer_account,
+            &mediator_account.owner_enc_pub_key,
+            &mediator_account.owner_sign_pub_key,
+        )
+        .map_err(|error| Error::LibraryError { error })?;
 
     timing!(
         "validator.issuance.transaction",
@@ -78,12 +116,15 @@ pub fn validate_asset_issuance(
     let save_objects_timer = Instant::now();
     // Save the transaction under the new state.
     let new_state = AssetTxState::Justification(TxSubstate::Validated);
-    instruction.state = new_state;
+    let instruction = Instruction {
+        state: new_state,
+        data: asset_tx.encode().to_vec(),
+    };
     save_object(
         db_dir.clone(),
         ON_CHAIN_DIR,
         &issuer,
-        &asset_transaction_file(tx_id, new_state),
+        &asset_transaction_file(tx_id, &issuer, new_state),
         &instruction,
     )?;
 
@@ -92,7 +133,7 @@ pub fn validate_asset_issuance(
         db_dir,
         ON_CHAIN_DIR,
         &issuer,
-        &format!("{}_{}", ticker, VALIDATED_PUBLIC_ACCOUNT_FILE),
+        &user_public_account_file(&ticker),
         &updated_issuer_account,
     )?;
 
@@ -105,15 +146,20 @@ pub fn validate_asset_issuance(
     Ok(())
 }
 
-pub fn validate_account(db_dir: PathBuf, user: String, ticker: String) -> Result<(), Error> {
+pub fn validate_account(db_dir: PathBuf, account_id: u32) -> Result<(), Error> {
     // Load the user's public account.
     let load_objects_timer = Instant::now();
 
-    let user_account: PubAccount = load_object(
+    let (user, ticker, tx_id) = get_user_ticker_from(account_id, db_dir.clone())?;
+    info!(
+        "Validating account{{id: {}, user: {}, ticker: {}}}",
+        account_id, user, ticker
+    );
+    let user_account: PubAccountTx = load_object(
         db_dir.clone(),
         ON_CHAIN_DIR,
-        &user,
-        &format!("{}_{}", ticker, PUBLIC_ACCOUNT_FILE),
+        COMMON_OBJECTS_DIR,
+        &account_create_transaction_file(tx_id, &user, &ticker),
     )?;
 
     let valid_asset_ids = get_asset_ids(db_dir.clone())?;
@@ -138,7 +184,7 @@ pub fn validate_account(db_dir: PathBuf, user: String, ticker: String) -> Result
         db_dir,
         ON_CHAIN_DIR,
         &user,
-        &format!("{}_{}", ticker, VALIDATED_PUBLIC_ACCOUNT_FILE),
+        &user_public_account_file(&ticker),
         &user_account,
     )?;
 
@@ -175,39 +221,53 @@ fn process_transaction(
 
 pub fn validate_transaction(
     db_dir: PathBuf,
-    sender: String,
-    receiver: String,
+    tx: JustifiedTx,
     mediator: String,
     tx_id: u32,
-    ticker: String,
 ) -> Result<(), Error> {
     let load_objects_timer = Instant::now();
     // Load the transaction, mediator's account, and issuer's public account.
 
+    let (sender, _, _) = get_user_ticker_from(
+        tx.content.content.init_data.content.memo.sndr_account_id,
+        db_dir.clone(),
+    )?;
+    let (receiver, ticker, _) = get_user_ticker_from(
+        tx.content.content.init_data.content.memo.rcvr_account_id,
+        db_dir.clone(),
+    )?;
+    info!(
+        "Validating asset transfer{{tx_id: {}, sender: {}, receiver: {}, ticker:{}, mediator: {}}}",
+        tx_id, sender, receiver, ticker, mediator
+    );
     let state = TxState::Justification(TxSubstate::Started);
 
     let mut instruction: CTXInstruction = load_object(
         db_dir.clone(),
         ON_CHAIN_DIR,
-        &sender,
-        &confidential_transaction_file(tx_id, state),
+        COMMON_OBJECTS_DIR,
+        &confidential_transaction_file(tx_id, &sender, state),
     )?;
 
-    let mediator_account: AccountMemo =
-        load_object(db_dir.clone(), ON_CHAIN_DIR, &mediator, PUBLIC_ACCOUNT_FILE)?;
+    let mediator_account: AccountMemo = load_object(
+        db_dir.clone(),
+        ON_CHAIN_DIR,
+        &mediator,
+        MEDIATOR_PUBLIC_ACCOUNT_FILE,
+    )?;
 
     let sender_account: PubAccount = load_object(
         db_dir.clone(),
         ON_CHAIN_DIR,
         &sender,
-        &format!("{}_{}", ticker, VALIDATED_PUBLIC_ACCOUNT_FILE),
+        &user_public_account_file(&ticker),
     )?;
 
     let receiver_account: PubAccount = load_object(
         db_dir.clone(),
         ON_CHAIN_DIR,
         &receiver,
-        &format!("{}_{}", ticker, VALIDATED_PUBLIC_ACCOUNT_FILE),
+        &user_public_account_file(&ticker),
     )?;
 
     timing!(
@@ -236,8 +296,8 @@ pub fn validate_transaction(
     save_object(
         db_dir.clone(),
         ON_CHAIN_DIR,
-        &sender,
-        &confidential_transaction_file(tx_id, instruction.state),
+        COMMON_OBJECTS_DIR,
+        &confidential_transaction_file(tx_id, &sender, instruction.state),
         &instruction,
     )?;
 
@@ -246,14 +306,14 @@ pub fn validate_transaction(
         db_dir.clone(),
         ON_CHAIN_DIR,
         &sender,
-        &format!("{}_{}", ticker, VALIDATED_PUBLIC_ACCOUNT_FILE),
+        &user_public_account_file(&ticker),
         &updated_sender_account,
     )?;
     save_object(
         db_dir,
         ON_CHAIN_DIR,
         &receiver,
-        &format!("{}_{}", ticker, VALIDATED_PUBLIC_ACCOUNT_FILE),
+        &user_public_account_file(&ticker),
         &updated_receiver_account,
     )?;
 

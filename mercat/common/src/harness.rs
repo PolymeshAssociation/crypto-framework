@@ -7,10 +7,9 @@ use crate::{
     errors::Error,
     gen_seed, gen_seed_from,
     justify::{justify_asset_issuance, justify_asset_transaction, process_create_mediator},
-    load_object,
-    validate::{validate_account, validate_asset_issuance, validate_transaction},
-    COMMON_OBJECTS_DIR, OFF_CHAIN_DIR, ON_CHAIN_DIR, SECRET_ACCOUNT_FILE,
-    VALIDATED_PUBLIC_ACCOUNT_FILE,
+    load_object, user_public_account_file, user_secret_account_file,
+    validate::validate_all_pending,
+    COMMON_OBJECTS_DIR, OFF_CHAIN_DIR, ON_CHAIN_DIR,
 };
 use cryptography::mercat::{Account, PubAccount, SecAccount};
 use linked_hash_map::LinkedHashMap;
@@ -45,6 +44,8 @@ pub enum Transaction {
     Create(Create),
     /// Issue tokens for an account (effectively funding an account).
     Issue(Issue),
+    /// Validate all pending transactions up to this point.
+    Validate(Validate),
 }
 
 /// A generic party, can be sender, receiver, or mediator.
@@ -165,6 +166,24 @@ impl TryFrom<(u32, String)> for Issue {
         })
     }
 }
+
+/// Data type for validating transactions
+#[derive(Debug)]
+pub struct Validate {}
+
+impl TryFrom<String> for Validate {
+    type Error = Error;
+    fn try_from(segment: String) -> Result<Self, Error> {
+        // Example: validate
+        if segment != "validate" {
+            return Err(Error::RegexError {
+                reason: format!("Expected 'validate', got {}", segment),
+            })?;
+        }
+        Ok(Self {})
+    }
+}
+
 /// Human readable form of a mercat account.
 #[derive(PartialEq, Eq, Hash, Debug)]
 pub struct InputAccount {
@@ -224,14 +243,13 @@ impl Transaction {
         chain_db_dir: PathBuf,
     ) -> Vec<StepFunc> {
         match self {
+            Transaction::Validate(validate) => validate.operations_order(chain_db_dir),
             Transaction::Issue(fund) => fund.operations_order(rng, chain_db_dir.clone()),
             Transaction::Transfer(transfer) => transfer.operations_order(rng, chain_db_dir.clone()),
             Transaction::Create(create) => create.operations_order(rng, chain_db_dir),
         }
     }
 }
-
-// TODO: CRYP-120: add cheating support to CLIs
 
 impl Transfer {
     pub fn send<T: RngCore + CryptoRng>(&self, rng: &mut T, chain_db_dir: PathBuf) -> StepFunc {
@@ -346,36 +364,36 @@ impl Transfer {
         });
     }
 
-    pub fn validate(&self, chain_db_dir: PathBuf) -> StepFunc {
-        let value = format!(
-            "tx-{}: $ mercat-validator validate-transaction --sender {} --receiver {} --mediator {} \
-            --account-id-from-ticker {} --tx-id {} --db-dir {}",
-            self.tx_id,
-            self.sender.name,
-            self.receiver.name,
-            self.mediator.name,
-            self.ticker,
-            self.tx_id,
-            path_to_string(&chain_db_dir),
-        );
-        let sender = self.sender.name.clone();
-        let receiver = self.receiver.name.clone();
-        let mediator = self.mediator.name.clone();
-        let tx_id = self.tx_id;
-        let ticker = self.ticker.clone();
-        return Box::new(move || {
-            info!("Running: {}", value.clone());
-            validate_transaction(
-                chain_db_dir.clone(),
-                sender.clone(),
-                receiver.clone(),
-                mediator.clone(),
-                tx_id,
-                ticker.clone(),
-            )?;
-            Ok(value.clone())
-        });
-    }
+    //pub fn validate(&self, chain_db_dir: PathBuf) -> StepFunc {
+    //    let value = format!(
+    //        "tx-{}: $ mercat-validator validate-transaction --sender {} --receiver {} --mediator {} \
+    //        --account-id-from-ticker {} --tx-id {} --db-dir {}",
+    //        self.tx_id,
+    //        self.sender.name,
+    //        self.receiver.name,
+    //        self.mediator.name,
+    //        self.ticker,
+    //        self.tx_id,
+    //        path_to_string(&chain_db_dir),
+    //    );
+    //    let sender = self.sender.name.clone();
+    //    let receiver = self.receiver.name.clone();
+    //    let mediator = self.mediator.name.clone();
+    //    let tx_id = self.tx_id;
+    //    let ticker = self.ticker.clone();
+    //    return Box::new(move || {
+    //        info!("Running: {}", value.clone());
+    //        validate_transaction(
+    //            chain_db_dir.clone(),
+    //            sender.clone(),
+    //            receiver.clone(),
+    //            mediator.clone(),
+    //            tx_id,
+    //            ticker.clone(),
+    //        )?;
+    //        Ok(value.clone())
+    //    });
+    //}
 
     pub fn operations_order<T: RngCore + CryptoRng>(
         &self,
@@ -386,7 +404,7 @@ impl Transfer {
             self.send(rng, chain_db_dir.clone()),
             self.receive(rng, chain_db_dir.clone()),
             self.mediate(chain_db_dir.clone()),
-            self.validate(chain_db_dir),
+            //self.validate(chain_db_dir),
         ]
     }
 }
@@ -445,40 +463,12 @@ impl Create {
         }
     }
 
-    pub fn validate(&self, chain_db_dir: PathBuf) -> StepFunc {
-        if let Some(ticker) = self.ticker.clone() {
-            // validate a normal account
-            let value = format!(
-                "tx-{}: $ mercat-validator validate-account --user {} --ticker {} --db-dir {}",
-                self.tx_id,
-                self.owner.name,
-                ticker,
-                path_to_string(&chain_db_dir),
-            );
-            let owner = self.owner.name.clone();
-            let ticker = ticker.clone();
-            return Box::new(move || {
-                info!("Running: {}", value.clone());
-                validate_account(chain_db_dir.clone(), owner.clone(), ticker.clone())?;
-                Ok(value.clone())
-            });
-        } else {
-            // validate mediator account
-            let value = format!("tx-{}: $ # mercat does not validate mediator accounts, since they are just two key pairs.",  self.tx_id);
-            info!("Running: {}", value.clone());
-            return Box::new(move || Ok(value.clone()));
-        }
-    }
-
     pub fn operations_order<T: RngCore + CryptoRng>(
         &self,
         rng: &mut T,
         chain_db_dir: PathBuf,
     ) -> Vec<StepFunc> {
-        vec![
-            self.create_account(rng, chain_db_dir.clone()),
-            self.validate(chain_db_dir),
-        ]
+        vec![self.create_account(rng, chain_db_dir.clone())]
     }
 }
 
@@ -551,34 +541,6 @@ impl Issue {
         });
     }
 
-    pub fn validate(&self, chain_db_dir: PathBuf) -> StepFunc {
-        // validate a normal account
-        let value = format!(
-            "tx-{}: $ mercat-validator validate-issuance --issuer {} --mediator {} --account-id-from-ticker {} --tx-id {} --db-dir {}",
-            self.tx_id,
-            self.issuer.name,
-            self.mediator.name,
-            self.ticker,
-            self.tx_id,
-            path_to_string(&chain_db_dir),
-        );
-        let issuer = self.issuer.name.clone();
-        let mediator = self.mediator.name.clone();
-        let ticker = self.ticker.clone();
-        let tx_id = self.tx_id;
-        return Box::new(move || {
-            info!("Running: {}", value.clone());
-            validate_asset_issuance(
-                chain_db_dir.clone(),
-                issuer.clone(),
-                mediator.clone(),
-                tx_id,
-                ticker.clone(),
-            )?;
-            Ok(value.clone())
-        });
-    }
-
     pub fn operations_order<T: RngCore + CryptoRng>(
         &self,
         rng: &mut T,
@@ -587,8 +549,26 @@ impl Issue {
         vec![
             self.issue(rng, chain_db_dir.clone()),
             self.mediate(chain_db_dir.clone()),
-            self.validate(chain_db_dir),
         ]
+    }
+}
+
+impl Validate {
+    pub fn validate(&self, chain_db_dir: PathBuf) -> StepFunc {
+        // validate a normal account
+        let value = format!(
+            "tx-NA: $ mercat-validator validate --db-dir {}",
+            path_to_string(&chain_db_dir),
+        );
+        return Box::new(move || {
+            info!("Running: {}", value.clone());
+            validate_all_pending(chain_db_dir.clone())?;
+            Ok(value.clone())
+        });
+    }
+
+    pub fn operations_order(&self, chain_db_dir: PathBuf) -> Vec<StepFunc> {
+        vec![self.validate(chain_db_dir)]
     }
 }
 
@@ -677,8 +657,8 @@ impl TestCase {
             if let Some(user) = dir.file_name().and_then(|user| user.to_str()) {
                 if user != COMMON_OBJECTS_DIR {
                     for ticker in self.ticker_names.clone() {
-                        let pub_file_name = format!("{}_{}", ticker, VALIDATED_PUBLIC_ACCOUNT_FILE);
-                        let sec_file_name = format!("{}_{}", ticker, SECRET_ACCOUNT_FILE);
+                        let pub_file_name = user_public_account_file(&ticker);
+                        let sec_file_name = user_secret_account_file(&ticker);
 
                         let mut path = dir.clone();
                         path.push(pub_file_name.clone());
@@ -876,6 +856,17 @@ fn parse_transactions(
                     transaction_id += 1;
                     transaction_list.push(TransactionMode::Transaction(Transaction::Transfer(
                         transfer,
+                    )));
+                } else if let Some(validate) = Validate::try_from(transaction.to_string())
+                    .map_err(|_| Error::ErrorParsingTestHarnessConfig {
+                        path: path.clone(),
+                        reason: String::from("validate"),
+                    })
+                    .ok()
+                {
+                    // validate does not need a transaction id
+                    transaction_list.push(TransactionMode::Transaction(Transaction::Validate(
+                        validate,
                     )));
                 } else {
                     return Err(Error::ErrorParsingTestHarnessConfig {
@@ -1113,21 +1104,33 @@ fn run_from(mode: &str) {
 mod tests {
     use super::*;
     use env_logger;
+    use log::debug;
     use wasm_bindgen_test::*;
+
+    fn cleanup_previous_run(mode: &str) {
+        let mut chain_db_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        chain_db_dir.push("chain_dir/unittest");
+        chain_db_dir.push(mode);
+        let res = std::fs::remove_dir_all(chain_db_dir);
+        debug!("Ignoring the status of removing chain dir: {:?}", res);
+    }
 
     #[test]
     fn test_on_slow_pc() {
         env_logger::init();
+        cleanup_previous_run("pc");
         run_from("pc");
     }
 
     #[test]
     fn test_on_fast_node() {
+        cleanup_previous_run("node");
         run_from("node");
     }
 
     #[wasm_bindgen_test]
     fn test_on_wasm() {
+        cleanup_previous_run("wasm");
         run_from("wasm");
     }
 }

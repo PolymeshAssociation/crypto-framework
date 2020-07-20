@@ -1,15 +1,14 @@
 use crate::{
-    asset_transaction_file, calc_account_id, create_rng_from_seed, errors::Error, load_object,
-    save_object, Instruction, OFF_CHAIN_DIR, ON_CHAIN_DIR, PUBLIC_ACCOUNT_FILE,
-    SECRET_ACCOUNT_FILE,
+    asset_transaction_file, create_rng_from_seed, errors::Error, last_ordering_state, load_object,
+    save_object, user_public_account_file, user_secret_account_file, Instruction,
+    COMMON_OBJECTS_DIR, MEDIATOR_PUBLIC_ACCOUNT_FILE, OFF_CHAIN_DIR, ON_CHAIN_DIR,
 };
 use codec::Encode;
 use cryptography::{
     asset_id_from_ticker,
     asset_proofs::CommitmentWitness,
     mercat::{
-        asset::AssetIssuer, AccountMemo, AssetTransactionIssuer, AssetTxState, SecAccount,
-        TxSubstate,
+        asset::AssetIssuer, Account, AccountMemo, AssetTransactionIssuer, AssetTxState, TxSubstate,
     },
 };
 use curve25519_dalek::scalar::Scalar;
@@ -37,23 +36,43 @@ pub fn process_issue_asset(
     let mut rng = create_rng_from_seed(Some(seed))?;
     let load_from_file_timer = Instant::now();
 
-    let issuer_account: SecAccount = load_object(
-        db_dir.clone(),
-        OFF_CHAIN_DIR,
-        &issuer,
-        &format!("{}_{}", ticker, SECRET_ACCOUNT_FILE),
-    )?;
+    //calc_account_id(issuer.clone(), ticker.clone()),
+    let issuer_account = Account {
+        pblc: load_object(
+            db_dir.clone(),
+            ON_CHAIN_DIR,
+            &issuer,
+            &user_public_account_file(&ticker),
+        )?,
+        scrt: load_object(
+            db_dir.clone(),
+            OFF_CHAIN_DIR,
+            &issuer,
+            &user_secret_account_file(&ticker),
+        )?,
+    };
 
     let mediator_account: AccountMemo = load_object(
         db_dir.clone(),
         ON_CHAIN_DIR,
         &mediator,
-        &PUBLIC_ACCOUNT_FILE,
+        &MEDIATOR_PUBLIC_ACCOUNT_FILE,
     )?;
 
     timing!(
         "account.issue_asset.load_from_file",
         load_from_file_timer,
+        Instant::now()
+    );
+
+    // Calculate the pending
+    let calc_pending_state_timer = Instant::now();
+    let ordering_state = last_ordering_state(issuer.clone(), db_dir.clone())?;
+    let next_pending_tx_counter = ordering_state.last_pending_tx_counter + 1;
+
+    timing!(
+        "account.finalize_tx.calc_pending_state",
+        calc_pending_state_timer,
         Instant::now()
     );
 
@@ -81,22 +100,23 @@ pub fn process_issue_asset(
     let ctx_issuer = AssetIssuer {};
     let mut asset_tx = ctx_issuer
         .initialize_asset_transaction(
-            calc_account_id(issuer.clone(), ticker.clone()),
             &issuer_account,
             &mediator_account.owner_enc_pub_key,
             amount,
+            next_pending_tx_counter,
             &mut rng,
         )
         .map_err(|error| Error::LibraryError { error })?;
 
     if cheat && cheating_strategy == 1 {
         info!("CLI log: tx-{}: Cheating by overwriting the asset id of the account. Correct ticker: {} and asset id: {:?}",
-                      tx_id, ticker, issuer_account.asset_id_witness.value());
+                      tx_id, ticker, issuer_account.scrt.asset_id_witness.value());
         let cheat_asset_id =
             asset_id_from_ticker("CHEAT").map_err(|error| Error::LibraryError { error })?;
         let cheat_asset_id_witness =
             CommitmentWitness::new(cheat_asset_id.clone().into(), Scalar::random(&mut rng));
         let cheat_enc_asset_id = issuer_account
+            .scrt
             .clone()
             .enc_keys
             .pblc
@@ -105,6 +125,7 @@ pub fn process_issue_asset(
         asset_tx.content.enc_asset_id = cheat_enc_asset_id;
         let message = asset_tx.content.encode();
         asset_tx.sig = issuer_account
+            .scrt
             .clone()
             .sign_keys
             .sign(SIG_CTXT.bytes(&message));
@@ -126,8 +147,8 @@ pub fn process_issue_asset(
     save_object(
         db_dir,
         ON_CHAIN_DIR,
-        &issuer,
-        &asset_transaction_file(tx_id, state),
+        COMMON_OBJECTS_DIR,
+        &asset_transaction_file(tx_id, &issuer, state),
         &instruction,
     )?;
 

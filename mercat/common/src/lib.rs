@@ -4,47 +4,126 @@ pub mod account_create;
 pub mod account_issue;
 pub mod account_transfer;
 pub mod chain_setup;
+pub mod errors;
+mod harness;
 pub mod justify;
 pub mod validate;
 
-pub mod errors;
-mod harness;
-
 use codec::{Decode, Encode};
-use cryptography::mercat::{AssetTxState, TxState};
+use cryptography::mercat::{
+    AssetTxState, EncryptedAmount, FinalizedTx, InitializedAssetTx, InitializedTx,
+    JustifiedAssetTx, JustifiedTx, OrderingState, PubAccountTx, TxState, TxSubstate,
+};
 use curve25519_dalek::scalar::Scalar;
 use errors::Error;
-use log::info;
+use log::{debug, info};
 use metrics::Recorder;
 use metrics_core::Key;
 use rand::{rngs::StdRng, Rng, SeedableRng};
 use rand::{CryptoRng, RngCore};
+use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::collections::hash_map::DefaultHasher;
 use std::convert::TryFrom;
 use std::hash::{Hash, Hasher};
 use std::{
+    collections::HashMap,
     convert::TryInto,
     fs::{create_dir_all, File},
     io::BufReader,
-    path::PathBuf,
+    path::{Path, PathBuf},
 };
 
 pub const ON_CHAIN_DIR: &str = "on-chain";
 pub const OFF_CHAIN_DIR: &str = "off-chain";
-pub const PUBLIC_ACCOUNT_FILE: &str = "public_account.json";
+pub const MEDIATOR_PUBLIC_ACCOUNT_FILE: &str = "mediator_public_account.json";
 pub const VALIDATED_PUBLIC_ACCOUNT_FILE: &str = "validated_public_account.json";
 pub const SECRET_ACCOUNT_FILE: &str = "secret_account.json";
 pub const ASSET_ID_LIST_FILE: &str = "valid_asset_ids.json";
 pub const COMMON_OBJECTS_DIR: &str = "common";
-pub const INIT_STATE: &str = "initialization_started";
-pub const JUSTIFY_STATE: &str = "justification_started";
-pub const FINISHED_STATE: &str = "finalization_started";
-pub const JUSTIFICATION_STATE: &str = "finalization_justification_started";
+pub const USER_ACCOUNT_MAP: &str = "user_ticker_to_account_id.json";
 
-#[inline]
-pub fn asset_transaction_file(tx_id: u32, state: AssetTxState) -> String {
-    format!("tx_{}_{}.json", tx_id, state)
+#[derive(Debug)]
+pub enum CoreTransaction {
+    Account(PubAccountTx),
+    IssueInit {
+        issue_tx: InitializedAssetTx,
+        issuer: String,
+        tx_id: u32,
+    },
+    IssueJustify {
+        issue_tx: JustifiedAssetTx,
+        mediator: String,
+        tx_id: u32,
+    },
+    TransferInit {
+        tx: InitializedTx,
+        sender: String,
+        tx_id: u32,
+    },
+    TransferFinalize {
+        tx: FinalizedTx,
+        receiver: String,
+        tx_id: u32,
+    },
+    TransferJustify {
+        tx: JustifiedTx,
+        mediator: String,
+        tx_id: u32,
+    },
+    Invalid,
+}
+
+impl CoreTransaction {
+    fn is_ready_for_validation(&self) -> bool {
+        match self {
+            CoreTransaction::Account(_) => true,
+            CoreTransaction::IssueJustify {
+                issue_tx: _,
+                mediator: _,
+                tx_id: _,
+            } => true,
+            CoreTransaction::TransferJustify {
+                tx: _,
+                mediator: _,
+                tx_id: _,
+            } => true,
+            _ => false,
+        }
+    }
+
+    fn decreases_account_balance(&self) -> bool {
+        match self {
+            CoreTransaction::TransferInit {
+                tx: _,
+                sender: _,
+                tx_id: _,
+            } => true,
+            _ => false,
+        }
+    }
+
+    pub fn ordering_state(&self) -> OrderingState {
+        match self {
+            CoreTransaction::Account(pub_account) => pub_account.content.ordering_state,
+            CoreTransaction::IssueInit {
+                issue_tx,
+                issuer: _,
+                tx_id: _,
+            } => issue_tx.content.memo.ordering_state,
+            CoreTransaction::TransferInit {
+                tx,
+                sender: _,
+                tx_id: _,
+            } => tx.content.memo.sndr_ordering_state,
+            CoreTransaction::TransferFinalize {
+                tx,
+                receiver: _,
+                tx_id: _,
+            } => tx.content.rcvr_ordering_state,
+            _ => OrderingState::default(), // justify transactions do not have ordering states. TODO: how to handle it on the caller?
+        }
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, Encode, Decode, Clone)]
@@ -55,8 +134,58 @@ pub struct Instruction {
 }
 
 #[inline]
-pub fn confidential_transaction_file(tx_id: u32, state: TxState) -> String {
-    format!("tx_{}_{}.json", tx_id, state)
+pub fn asset_transaction_file(tx_id: u32, user: &String, state: AssetTxState) -> String {
+    format!("tx_{}_{}_{}.json", tx_id, user, state)
+}
+
+#[inline]
+pub fn confidential_transaction_file(tx_id: u32, user: &String, state: TxState) -> String {
+    format!("tx_{}_{}_{}.json", tx_id, user, state)
+}
+
+#[inline]
+pub fn account_create_transaction_file(tx_id: u32, user: &String, ticker: &String) -> String {
+    format!("tx_{}_{}_ticker#{}.json", tx_id, user, ticker)
+}
+
+#[inline]
+pub fn user_public_account_file(ticker: &String) -> String {
+    format!("{}_{}", ticker, VALIDATED_PUBLIC_ACCOUNT_FILE)
+}
+
+#[inline]
+pub fn user_secret_account_file(ticker: &String) -> String {
+    format!("{}_{}", ticker, SECRET_ACCOUNT_FILE)
+}
+
+#[inline]
+pub fn parse_tx_name(tx_file_path: String) -> Result<(u32, String, String, String), Error> {
+    let re = Regex::new(r"^tx_([0-9]+)_([a-z]+)_([a-zA-Z-#]+).json$").map_err(|_| {
+        Error::RegexError {
+            reason: String::from("Failed to compile the transaction file name regex"),
+        }
+    })?;
+    let file_name = Path::new(&tx_file_path)
+        .file_name()
+        .expect("It is a file and therefore, this should never fail!")
+        .to_str()
+        .ok_or(Error::PathBufConversionError)?;
+    let caps = re.captures(&file_name).ok_or(Error::RegexError {
+        reason: format!("Transaction info pattern did not match {}", file_name),
+    })?;
+    let tx_id = caps[1]
+        .to_string()
+        .parse::<u32>()
+        .map_err(|_| Error::RegexError {
+            reason: String::from("failed to convert amount to u32."),
+        })?;
+    let user = caps[2].to_string();
+    let state = caps[3].to_string();
+    debug!(
+        "Found tx_id: {}, user: {}, state: {} in {}",
+        tx_id, user, state, tx_file_path
+    );
+    Ok((tx_id, user, state, tx_file_path))
 }
 
 #[derive(Debug, Serialize, Deserialize, Encode, Decode, Clone)]
@@ -251,7 +380,12 @@ pub fn load_object<T: Decode>(
     file_name: &str,
 ) -> Result<T, Error> {
     let file_path = construct_path(db_dir, on_off_chain, user, file_name);
+    load_object_from(file_path)
+}
 
+/// Utility function to read an object that implements the Encode trait from file.
+#[inline]
+pub fn load_object_from<T: Decode>(file_path: PathBuf) -> Result<T, Error> {
     let data = std::fs::read(file_path.clone()).map_err(|error| Error::FileReadError {
         error,
         path: file_path.clone(),
@@ -321,9 +455,311 @@ where
 }
 
 /// Helper function to create account id from user and ticker.
-/// This removes the need to maintain a database of account id mappings.
 #[inline]
 pub fn calc_account_id(user: String, ticker: String) -> u32 {
     let u32_val = simple_hasher(&format!("{}_{}", user, ticker)) % (u32::MAX as u64);
     u32::try_from(u32_val).unwrap_or_default()
+}
+
+#[inline]
+pub fn load_account_map(db_dir: PathBuf) -> HashMap<u32, (String, String, u32)> {
+    let mapping: Result<HashMap<u32, (String, String, u32)>, Error> =
+        load_from_file(db_dir, OFF_CHAIN_DIR, COMMON_OBJECTS_DIR, USER_ACCOUNT_MAP);
+    match mapping {
+        Err(_error) => HashMap::new(),
+        Ok(mapping) => mapping,
+    }
+}
+
+#[inline]
+pub fn update_account_map(
+    db_dir: PathBuf,
+    user: String,
+    ticker: String,
+    account_id: u32,
+    tx_id: u32,
+) -> Result<(), Error> {
+    let mut mapping = load_account_map(db_dir.clone());
+    mapping.insert(account_id, (user, ticker, tx_id));
+    save_to_file(
+        db_dir,
+        OFF_CHAIN_DIR,
+        COMMON_OBJECTS_DIR,
+        USER_ACCOUNT_MAP,
+        &mapping,
+    )
+}
+
+#[inline]
+pub fn get_user_ticker_from(
+    account_id: u32,
+    db_dir: PathBuf,
+) -> Result<(String, String, u32), Error> {
+    let mapping = load_account_map(db_dir.clone());
+    let (user, ticker, tx_id) = mapping
+        .get(&account_id)
+        .ok_or(Error::AccountIdNotFound { account_id })?;
+    Ok((user.clone(), ticker.clone(), tx_id.clone()))
+}
+
+#[inline]
+pub fn last_ordering_state(user: String, db_dir: PathBuf) -> Result<OrderingState, Error> {
+    let all_tx_files = all_unverified_tx_files(db_dir)?;
+    const ERROR_CASE: i32 = -2;
+    const INITIAL_CASE: i32 = -3;
+
+    let parsed: (i32, i32, CoreTransaction) = all_tx_files
+        .into_iter()
+        .map(|tx| parse_tx_name(tx)) // extract info from file name
+        .filter(|res| {
+            // keep only the files that are created for the current user
+            res.as_ref()
+                .map_or_else(|_| false, |(_, tx_user, _, _)| tx_user == &user)
+        })
+        .map(|res| {
+            // convert the files into tx objects
+            res.map(|(tx_id, user, state, tx_file_path)| {
+                load_tx_file(tx_id, user, state, tx_file_path)
+                    .map_or_else(|_| CoreTransaction::Invalid, |tx| tx) // remove Result
+            })
+        })
+        .fold(
+            (INITIAL_CASE, INITIAL_CASE, CoreTransaction::Invalid),
+            // closure of the fold operator.
+            |acc, tx| {
+                // find the last transaction by comparing the last pending transaction value of each tx.
+                let (max_pending, last_processed, last_tx) = acc;
+                match tx {
+                    Err(error) => {
+                        debug!("Error while finding the last transaction: {:?}", error);
+                        (ERROR_CASE, ERROR_CASE, CoreTransaction::Invalid)
+                    }
+                    Ok(tx) => {
+                        let ordering_state = tx.ordering_state();
+                        if max_pending == ERROR_CASE {
+                            (ERROR_CASE, ERROR_CASE, CoreTransaction::Invalid)
+                        } else if ordering_state.last_pending_tx_counter as i32 > max_pending {
+                            (
+                                ordering_state.last_pending_tx_counter as i32,
+                                ordering_state.last_processed_tx_counter,
+                                tx,
+                            )
+                        } else {
+                            (max_pending, last_processed, last_tx)
+                        }
+                    }
+                }
+            },
+        );
+    let (last_pending_tx_counter, last_processed_tx_counter, _) = parsed;
+    if last_pending_tx_counter <= -1 {
+        return Err(Error::LastTransactionNotFound { user });
+    }
+    let last_pending_tx_counter: u32 = u32::try_from(last_pending_tx_counter).unwrap();
+    Ok(OrderingState {
+        last_pending_tx_counter,
+        last_processed_tx_counter,
+    })
+}
+
+#[inline]
+pub fn load_tx_between_counters_for_user(
+    user: &String,
+    db_dir: PathBuf,
+    start: u32,
+    end: u32,
+) -> Result<Vec<CoreTransaction>, Error> {
+    all_unverified_tx_files(db_dir)?
+        .into_iter()
+        .map(|tx| parse_tx_name(tx))
+        .filter(|res| {
+            // keep only the files that are created for the current user
+            res.as_ref()
+                .map_or_else(|_| false, |(_, tx_user, _, _)| tx_user == user)
+        })
+        .map(|res| {
+            // convert the files into tx objects
+            res.map(|(tx_id, user, state, tx_file_path)| {
+                load_tx_file(tx_id, user, state, tx_file_path)
+                    .map_or_else(|_| CoreTransaction::Invalid, |tx| tx) // remove Result
+            })
+        })
+        .filter(|res| {
+            // keep only the transactions that are created between `start` and `end`
+            res.as_ref().map_or_else(
+                |_| false,
+                |tx| {
+                    tx.ordering_state().last_pending_tx_counter >= start
+                        && tx.ordering_state().last_pending_tx_counter <= end
+                },
+            )
+        })
+        .collect()
+}
+
+#[inline]
+pub fn compute_enc_pending_balance(
+    sender: &String,
+    ordering_state: OrderingState, // The state at the time of creating the last transaction
+    last_processed_tx_counter: i32, // The current last processed tx counter
+    enc_balance_in_account: EncryptedAmount,
+    db_dir: PathBuf,
+) -> Result<Option<EncryptedAmount>, Error> {
+    if last_processed_tx_counter < ordering_state.last_processed_tx_counter {
+        return Err(Error::MismatchInProcessedCounter {
+            current: last_processed_tx_counter,
+            earliest: ordering_state.last_processed_tx_counter,
+        });
+    }
+    // last_processed_tx_counter > ordering_state.last_processed_tx_counter &&  last_processed_tx_counter > pending -> pending has been skipped
+    // last_processed_tx_counter > ordering_state.last_processed_tx_counter &&  last_processed_tx_counter == pending -> error
+    // last_processed_tx_counter > ordering_state.last_processed_tx_counter &&  last_processed_tx_counter < pending
+    // last_processed_tx_counter == ordering_state.last_processed_tx_counter
+
+    let start = u32::try_from(ordering_state.last_processed_tx_counter + 1).map_err(|_| {
+        Error::InvalidLastProcessedTxCounter {
+            value: ordering_state.last_processed_tx_counter,
+        }
+    })?;
+    let transfer_inits = load_tx_between_counters_for_user(
+        sender,
+        db_dir,
+        start,
+        ordering_state.last_pending_tx_counter,
+    )?
+    .into_iter()
+    .filter(|tx| tx.decreases_account_balance())
+    .collect::<Vec<CoreTransaction>>();
+
+    if transfer_inits.len() == 0 {
+        // There are no pending transactions
+        return Ok(None);
+    }
+
+    // TODO: implementing the simple case for now where the last processed transaction inside the account
+    //       is the same as the last processed transaction inside the last transaction.
+    if last_processed_tx_counter != ordering_state.last_processed_tx_counter {
+        return Err(Error::NotImplemented {
+            story: "CRYP-TODO".to_string(),
+        });
+    }
+
+    let mut pending_balance = enc_balance_in_account;
+    for core_tx in transfer_inits {
+        if let CoreTransaction::TransferInit {
+            tx,
+            sender: _,
+            tx_id: _,
+        } = core_tx
+        {
+            pending_balance -= tx.content.memo.enc_amount_using_sndr;
+        }
+    }
+    Ok(Some(pending_balance))
+}
+
+pub fn all_unverified_tx_files(db_dir: PathBuf) -> Result<Vec<String>, Error> {
+    let start = last_verified_tx_id(db_dir.clone())?;
+    let mut dir = db_dir.clone();
+    dir.push(ON_CHAIN_DIR);
+    dir.push(COMMON_OBJECTS_DIR);
+
+    let mut files = vec![];
+    for entry in std::fs::read_dir(dir.clone()).map_err(|error| Error::FileReadError {
+        error,
+        path: dir.clone(),
+    })? {
+        let entry = entry.map_err(|error| Error::FileReadError {
+            error,
+            path: dir.clone(),
+        })?;
+        let path = entry.path();
+        if !path.is_dir() {
+            let file_name: &str = path
+                .file_name()
+                .expect("It is a file and therefore, this should never fail!")
+                .to_str()
+                .ok_or(Error::PathBufConversionError)?;
+            if file_name.starts_with("tx_") {
+                debug!("Found transaction file: {}", file_name);
+                let re = Regex::new(r"^tx_([0-9]+)_.*$").map_err(|_| Error::RegexError {
+                    reason: String::from("Failed to compile the transaction id regex"),
+                })?;
+                let caps = re.captures(&file_name).ok_or(Error::RegexError {
+                    reason: format!("Pattern did not match {}", file_name),
+                })?;
+                let tx_id = caps[1]
+                    .to_string()
+                    .parse::<u32>()
+                    .map_err(|_| Error::RegexError {
+                        reason: String::from("failed to convert amount to u32."),
+                    })?;
+                if tx_id as i32 > start {
+                    debug!("Transaction file: {} is greater than {}", file_name, start);
+                    files.push(String::from(
+                        path.to_str().ok_or(Error::PathBufConversionError)?,
+                    ));
+                }
+            }
+        }
+    }
+    Ok(files)
+}
+
+pub fn last_verified_tx_id(_db_dir: PathBuf) -> Result<i32, Error> {
+    // TODO read from file and update it after verification is done
+    Ok(-1)
+}
+
+pub fn load_tx_file(
+    tx_id: u32,
+    user: String,
+    state: String,
+    tx_file_path: String,
+) -> Result<CoreTransaction, Error> {
+    let tx = if state == AssetTxState::Initialization(TxSubstate::Started).to_string() {
+        let instruction: Instruction = load_object_from(PathBuf::from(tx_file_path))?;
+        CoreTransaction::IssueInit {
+            issue_tx: InitializedAssetTx::decode(&mut &instruction.data[..])
+                .map_err(|_| Error::DecodeError)?,
+            issuer: user,
+            tx_id,
+        }
+    } else if state == AssetTxState::Justification(TxSubstate::Started).to_string() {
+        let instruction: Instruction = load_object_from(PathBuf::from(tx_file_path))?;
+        CoreTransaction::IssueJustify {
+            issue_tx: JustifiedAssetTx::decode(&mut &instruction.data[..])
+                .map_err(|_| Error::DecodeError)?,
+            mediator: user,
+            tx_id,
+        }
+    } else if state == TxState::Initialization(TxSubstate::Started).to_string() {
+        let instruction: Instruction = load_object_from(PathBuf::from(tx_file_path))?;
+        CoreTransaction::TransferInit {
+            tx: InitializedTx::decode(&mut &instruction.data[..])
+                .map_err(|_| Error::DecodeError)?,
+            sender: user,
+            tx_id,
+        }
+    } else if state == TxState::Finalization(TxSubstate::Started).to_string() {
+        let instruction: Instruction = load_object_from(PathBuf::from(tx_file_path))?;
+        CoreTransaction::TransferFinalize {
+            tx: FinalizedTx::decode(&mut &instruction.data[..]).map_err(|_| Error::DecodeError)?,
+            receiver: user,
+            tx_id,
+        }
+    } else if state == TxState::Justification(TxSubstate::Started).to_string() {
+        let instruction: Instruction = load_object_from(PathBuf::from(tx_file_path))?;
+        CoreTransaction::TransferJustify {
+            tx: JustifiedTx::decode(&mut &instruction.data[..]).map_err(|_| Error::DecodeError)?,
+            mediator: user,
+            tx_id,
+        }
+    } else if state.starts_with("ticker#") {
+        let pub_account: PubAccountTx = load_object_from(PathBuf::from(tx_file_path))?;
+        CoreTransaction::Account(pub_account)
+    } else {
+        return Err(Error::InvalidTransactionFile { path: tx_file_path });
+    };
+    Ok(tx)
 }
