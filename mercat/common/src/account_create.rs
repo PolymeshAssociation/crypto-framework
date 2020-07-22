@@ -45,6 +45,7 @@ pub fn process_create_account(
     let account_creator = AccountCreator {};
     let mut account_tx = account_creator
         .create(
+            tx_id,
             secret_account.clone(),
             &valid_asset_ids,
             account_id,
@@ -73,7 +74,7 @@ pub fn process_create_account(
                 account_tx.content.pub_account.enc_asset_id =
                     EncryptedAssetId::from(cheat_enc_asset_id);
                 let message = account_tx.content.pub_account.encode();
-                account_tx.initial_sig = secret_account
+                account_tx.sig = secret_account
                     .clone()
                     .sign_keys
                     .sign(SIG_CTXT.bytes(&message));

@@ -11,7 +11,7 @@ pub mod validate;
 
 use codec::{Decode, Encode};
 use cryptography::mercat::{
-    AssetTxState, EncryptedAmount, FinalizedTx, InitializedAssetTx, InitializedTx,
+    Account, AssetTxState, EncryptedAmount, FinalizedTx, InitializedAssetTx, InitializedTx,
     JustifiedAssetTx, JustifiedTx, OrderingState, PubAccountTx, TxState, TxSubstate,
 };
 use curve25519_dalek::scalar::Scalar;
@@ -132,6 +132,31 @@ impl CoreTransaction {
                 tx_id: _,
             } => tx.content.rcvr_ordering_state,
             _ => OrderingState::default(), // justify transactions do not have ordering states. TODO: how to handle it on the caller?
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub enum Direction {
+    Incoming,
+    Outgoing,
+}
+
+#[derive(Clone)]
+pub struct ValidationResult {
+    user: String,
+    ticker: String,
+    direction: Direction,
+    amount: Option<EncryptedAmount>,
+}
+
+impl ValidationResult {
+    fn error(user: &str, ticker: &str) -> Self {
+        Self {
+            user: user.to_string(),
+            ticker: ticker.to_string(),
+            direction: Direction::Incoming,
+            amount: None,
         }
     }
 }
@@ -509,9 +534,11 @@ pub fn get_user_ticker_from(
 }
 
 #[inline]
-pub fn last_ordering_state(
+pub fn last_ordering_state_before(
     user: String,
     last_processed_tx_counter_from_account: i32,
+    current_tx_id: u32,
+    max_tx_id: u32,
     db_dir: PathBuf,
 ) -> Result<OrderingState, Error> {
     let all_tx_files = all_unverified_tx_files(db_dir)?;
@@ -523,8 +550,10 @@ pub fn last_ordering_state(
         .map(|tx| parse_tx_name(tx)) // extract info from file name
         .filter(|res| {
             // keep only the files that are created for the current user
-            res.as_ref()
-                .map_or_else(|_| false, |(_, tx_user, _, _)| tx_user == &user)
+            res.as_ref().map_or_else(
+                |_| false,
+                |(tx_id, tx_user, _, _)| tx_user == &user && tx_id < &max_tx_id,
+            )
         })
         .map(|res| {
             // convert the files into tx objects
@@ -570,12 +599,14 @@ pub fn last_ordering_state(
         return Ok(OrderingState {
             last_processed_tx_counter: last_processed_tx_counter_from_account,
             last_pending_tx_counter: last_processed_tx_counter_from_account,
+            current_tx_id,
         });
         //return Err(Error::LastTransactionNotFound { user });
     }
     Ok(OrderingState {
         last_pending_tx_counter,
         last_processed_tx_counter,
+        current_tx_id,
     })
 }
 
@@ -621,7 +652,7 @@ pub fn compute_enc_pending_balance(
     last_processed_tx_counter: i32, // The current last processed tx counter
     enc_balance_in_account: EncryptedAmount,
     db_dir: PathBuf,
-) -> Result<Option<EncryptedAmount>, Error> {
+) -> Result<EncryptedAmount, Error> {
     if last_processed_tx_counter < ordering_state.last_processed_tx_counter {
         return Err(Error::MismatchInProcessedCounter {
             current: last_processed_tx_counter,
@@ -637,7 +668,7 @@ pub fn compute_enc_pending_balance(
     debug!("------------> start: {}", start);
     let transfer_inits = load_tx_between_counters_for_user(
         sender,
-        db_dir,
+        db_dir.clone(),
         start,
         ordering_state.last_pending_tx_counter,
     )?
@@ -651,7 +682,7 @@ pub fn compute_enc_pending_balance(
     );
     if transfer_inits.len() == 0 {
         // There are no pending transactions
-        return Ok(None);
+        return Ok(enc_balance_in_account);
     }
 
     // TODO: implementing the simple case for now where the last processed transaction inside the account
@@ -671,10 +702,18 @@ pub fn compute_enc_pending_balance(
         } = core_tx
         {
             pending_balance -= tx.content.memo.enc_amount_using_sndr;
-            debug!("---> decremented!");
+            let account_id = tx.content.memo.sndr_account_id;
+            debug!(
+                "------> decremented by {}.",
+                debug_decrypt(
+                    account_id,
+                    tx.content.memo.enc_amount_using_sndr,
+                    db_dir.clone()
+                )?
+            );
         }
     }
-    Ok(Some(pending_balance))
+    Ok(pending_balance)
 }
 
 pub fn all_unverified_tx_files(db_dir: PathBuf) -> Result<Vec<String>, Error> {
@@ -789,4 +828,34 @@ pub fn load_tx_file(
         return Err(Error::InvalidTransactionFile { path: tx_file_path });
     };
     Ok(tx)
+}
+
+/// Use only for debugging purposes.
+#[inline]
+fn debug_decrypt(
+    account_id: u32,
+    enc_balance: EncryptedAmount,
+    db_dir: PathBuf,
+) -> Result<u32, Error> {
+    let (user, ticker, _) = get_user_ticker_from(account_id, db_dir.clone())?;
+    let account = Account {
+        scrt: load_object(
+            db_dir.clone(),
+            OFF_CHAIN_DIR,
+            &user,
+            &user_secret_account_file(&ticker),
+        )?,
+        pblc: load_object(
+            db_dir.clone(),
+            ON_CHAIN_DIR,
+            &user,
+            &user_public_account_file(&ticker),
+        )?,
+    };
+    account
+        .scrt
+        .enc_keys
+        .scrt
+        .decrypt(&enc_balance)
+        .map_err(|error| Error::LibraryError { error })
 }

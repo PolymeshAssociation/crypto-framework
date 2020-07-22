@@ -1,6 +1,6 @@
 use crate::{
-    asset_transaction_file, create_rng_from_seed, errors::Error, last_ordering_state, load_object,
-    save_object, user_public_account_file, user_secret_account_file, Instruction,
+    asset_transaction_file, create_rng_from_seed, errors::Error, last_ordering_state_before,
+    load_object, save_object, user_public_account_file, user_secret_account_file, Instruction,
     COMMON_OBJECTS_DIR, MEDIATOR_PUBLIC_ACCOUNT_FILE, OFF_CHAIN_DIR, ON_CHAIN_DIR,
 };
 use codec::Encode;
@@ -67,9 +67,11 @@ pub fn process_issue_asset(
 
     // Calculate the pending
     let calc_pending_state_timer = Instant::now();
-    let ordering_state = last_ordering_state(
+    let ordering_state = last_ordering_state_before(
         issuer.clone(),
         issuer_account.pblc.memo.last_processed_tx_counter,
+        tx_id,
+        tx_id,
         db_dir.clone(),
     )?;
     let next_pending_tx_counter = ordering_state.last_pending_tx_counter + 1;
@@ -104,6 +106,7 @@ pub fn process_issue_asset(
     let ctx_issuer = AssetIssuer {};
     let mut asset_tx = ctx_issuer
         .initialize_asset_transaction(
+            tx_id,
             &issuer_account,
             &mediator_account.owner_enc_pub_key,
             amount,

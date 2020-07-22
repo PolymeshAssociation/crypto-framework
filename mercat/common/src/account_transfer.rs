@@ -1,7 +1,7 @@
 use crate::{
     compute_enc_pending_balance, confidential_transaction_file, construct_path,
-    create_rng_from_seed, errors::Error, last_ordering_state, load_object, save_object,
-    user_public_account_file, user_secret_account_file, CTXInstruction, Instruction,
+    create_rng_from_seed, debug_decrypt, errors::Error, last_ordering_state_before, load_object,
+    save_object, user_public_account_file, user_secret_account_file, CTXInstruction, Instruction,
     COMMON_OBJECTS_DIR, MEDIATOR_PUBLIC_ACCOUNT_FILE, OFF_CHAIN_DIR, ON_CHAIN_DIR,
 };
 use codec::{Decode, Encode};
@@ -11,7 +11,7 @@ use cryptography::mercat::{
     TxState, TxSubstate,
 };
 use lazy_static::lazy_static;
-use log::info;
+use log::{debug, info};
 use metrics::timing;
 use rand::Rng;
 use schnorrkel::{context::SigningContext, signing_context};
@@ -74,8 +74,13 @@ pub fn process_create_tx(
     let calc_pending_state_timer = Instant::now();
     let last_processed_tx_counter = sender_account.pblc.memo.last_processed_tx_counter;
     let last_processed_account_balance = sender_account.pblc.enc_balance;
-    let ordering_state =
-        last_ordering_state(sender.clone(), last_processed_tx_counter, db_dir.clone())?;
+    let ordering_state = last_ordering_state_before(
+        sender.clone(),
+        last_processed_tx_counter,
+        tx_id,
+        tx_id,
+        db_dir.clone(),
+    )?;
 
     let pending_balance = compute_enc_pending_balance(
         &sender,
@@ -84,6 +89,15 @@ pub fn process_create_tx(
         last_processed_account_balance,
         db_dir.clone(),
     )?;
+    debug!(
+        "------------> initiating transfer tx: {}, pending_balance: {}",
+        tx_id,
+        debug_decrypt(
+            sender_account.pblc.id,
+            pending_balance.clone(),
+            db_dir.clone()
+        )?
+    );
     let next_pending_tx_counter = ordering_state.last_pending_tx_counter + 1;
 
     timing!(
@@ -112,6 +126,7 @@ pub fn process_create_tx(
     let ctx_sender = CtxSender {};
     let mut asset_tx = ctx_sender
         .create_transaction(
+            tx_id,
             &sender_account,
             &receiver_account,
             &mediator_account.owner_enc_pub_key,
@@ -224,9 +239,11 @@ pub fn process_finalize_tx(
 
     // Calculate the pending
     let calc_pending_state_timer = Instant::now();
-    let ordering_state = last_ordering_state(
+    let ordering_state = last_ordering_state_before(
         receiver,
         receiver_account.pblc.memo.last_processed_tx_counter,
+        tx_id,
+        tx_id,
         db_dir.clone(),
     )?;
     let next_pending_tx_counter = ordering_state.last_pending_tx_counter + 1;
@@ -257,6 +274,7 @@ pub fn process_finalize_tx(
     let receiver = CtxReceiver {};
     let mut asset_tx = receiver
         .finalize_transaction(
+            tx_id,
             tx,
             &sender_account.memo.owner_sign_pub_key,
             receiver_account.clone(),
