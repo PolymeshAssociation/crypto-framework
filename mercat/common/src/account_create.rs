@@ -46,7 +46,7 @@ pub fn process_create_account(
     let mut account_tx = account_creator
         .create(
             tx_id,
-            secret_account.clone(),
+            &secret_account,
             &valid_asset_ids,
             account_id,
             &mut rng,
