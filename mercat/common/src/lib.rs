@@ -131,7 +131,7 @@ impl CoreTransaction {
                 receiver: _,
                 tx_id: _,
             } => tx.content.rcvr_ordering_state,
-            _ => OrderingState::default(), // justify transactions do not have ordering states. TODO: how to handle it on the caller?
+            _ => OrderingState::default(),
         }
     }
 }

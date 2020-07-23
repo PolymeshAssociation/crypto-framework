@@ -1072,7 +1072,6 @@ fn run_from(mode: &str) {
                     assert!(false, "Test succeed, but it was expected to fail.");
                 }
             } else {
-                // TODO: CRYP-124: enable `_simple.yml` and make sure the following works once the transaction processing is done.
                 if let Err(error) = got {
                     assert!(
                         false,

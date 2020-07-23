@@ -16,7 +16,7 @@ use cryptography::{
 };
 use curve25519_dalek::scalar::Scalar;
 use lazy_static::lazy_static;
-use log::{debug, info};
+use log::info;
 use metrics::timing;
 use rand::{CryptoRng, RngCore};
 use schnorrkel::{context::SigningContext, signing_context, ExpansionMode, MiniSecretKey};
