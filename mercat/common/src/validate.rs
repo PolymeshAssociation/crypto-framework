@@ -10,8 +10,8 @@ use codec::{Decode, Encode};
 use cryptography::mercat::{
     account::AccountValidator, asset::AssetValidator, transaction::TransactionValidator,
     AccountCreatorVerifier, AccountMemo, AssetTransactionVerifier, AssetTxState, EncryptedAmount,
-    JustifiedAssetTx, JustifiedTx, PubAccount, PubAccountTx, TransactionVerifier, TxState,
-    TxSubstate,
+    JustifiedAssetTx, JustifiedTransferTx, PubAccount, PubAccountTx, TransferTransactionVerifier,
+    TxState, TxSubstate,
 };
 use log::{debug, error, info};
 use metrics::timing;
@@ -40,7 +40,6 @@ pub fn validate_all_pending(db_dir: PathBuf) -> Result<(), Error> {
     let mut last_tx_id: i32 = -1;
     debug!("----> Read all the unverified transactions!");
 
-    // results[user][ticker][incoming/outgoing] = [list of encrypted amounts]
     let mut results: Vec<ValidationResult> = vec![];
     // For each of them call the validate function and process as needed
     for tx in all_unverified_and_ready {
@@ -385,7 +384,7 @@ fn process_transaction(
     pending_balance: EncryptedAmount,
 ) -> Result<(PubAccount, PubAccount), Error> {
     let mut rng = OsRng::default();
-    let tx = JustifiedTx::decode(&mut &instruction.data[..]).unwrap();
+    let tx = JustifiedTransferTx::decode(&mut &instruction.data[..]).unwrap();
     let validator = TransactionValidator {};
     let (updated_sender_account, updated_receiver_account) = validator
         .verify_transaction(
@@ -403,7 +402,7 @@ fn process_transaction(
 
 pub fn validate_transaction(
     db_dir: PathBuf,
-    tx: JustifiedTx,
+    tx: JustifiedTransferTx,
     mediator: String,
     pending_balance: EncryptedAmount,
     tx_id: u32,

@@ -7,8 +7,8 @@ use crate::{
 use codec::{Decode, Encode};
 use cryptography::mercat::{
     transaction::{CtxReceiver, CtxSender},
-    Account, AccountMemo, InitializedTx, PubAccount, TransactionReceiver, TransactionSender,
-    TxState, TxSubstate,
+    Account, AccountMemo, InitializedTransferTx, PubAccount, TransferTransactionReceiver,
+    TransferTransactionSender, TxState, TxSubstate,
 };
 use lazy_static::lazy_static;
 use log::{debug, info};
@@ -219,7 +219,7 @@ pub fn process_finalize_tx(
         &confidential_transaction_file(tx_id.clone(), &sender, state),
     )?;
 
-    let tx = InitializedTx::decode(&mut &instruction.data[..]).map_err(|error| {
+    let tx = InitializedTransferTx::decode(&mut &instruction.data[..]).map_err(|error| {
         Error::ObjectLoadError {
             error,
             path: construct_path(

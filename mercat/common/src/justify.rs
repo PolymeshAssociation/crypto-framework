@@ -10,8 +10,8 @@ use cryptography::{
     asset_proofs::{CommitmentWitness, ElgamalSecretKey},
     mercat::{
         asset::AssetMediator, transaction::CtxMediator, AccountMemo, AssetTransactionMediator,
-        AssetTxState, EncryptionKeys, FinalizedTx, InitializedAssetTx, MediatorAccount, PubAccount,
-        TransactionMediator, TxState, TxSubstate,
+        AssetTxState, EncryptionKeys, FinalizedTransferTx, InitializedAssetTx, MediatorAccount,
+        PubAccount, TransferTransactionMediator, TxState, TxSubstate,
     },
 };
 use curve25519_dalek::scalar::Scalar;
@@ -250,7 +250,7 @@ pub fn justify_asset_transaction(
         &instruction_path,
     )?;
 
-    let asset_tx = FinalizedTx::decode(&mut &instruction.data[..]).map_err(|error| {
+    let asset_tx = FinalizedTransferTx::decode(&mut &instruction.data[..]).map_err(|error| {
         Error::ObjectLoadError {
             error,
             path: construct_path(

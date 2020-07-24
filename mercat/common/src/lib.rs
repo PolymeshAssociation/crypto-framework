@@ -11,8 +11,9 @@ pub mod validate;
 
 use codec::{Decode, Encode};
 use cryptography::mercat::{
-    Account, AssetTxState, EncryptedAmount, FinalizedTx, InitializedAssetTx, InitializedTx,
-    JustifiedAssetTx, JustifiedTx, OrderingState, PubAccountTx, TxState, TxSubstate,
+    Account, AssetTxState, EncryptedAmount, FinalizedTransferTx, InitializedAssetTx,
+    InitializedTransferTx, JustifiedAssetTx, JustifiedTransferTx, OrderingState, PubAccountTx,
+    TxState, TxSubstate,
 };
 use curve25519_dalek::scalar::Scalar;
 use errors::Error;
@@ -61,17 +62,17 @@ pub enum CoreTransaction {
         tx_id: u32,
     },
     TransferInit {
-        tx: InitializedTx,
+        tx: InitializedTransferTx,
         sender: String,
         tx_id: u32,
     },
     TransferFinalize {
-        tx: FinalizedTx,
+        tx: FinalizedTransferTx,
         receiver: String,
         tx_id: u32,
     },
     TransferJustify {
-        tx: JustifiedTx,
+        tx: JustifiedTransferTx,
         mediator: String,
         tx_id: u32,
     },
@@ -802,7 +803,7 @@ pub fn load_tx_file(
     } else if state == TxState::Initialization(TxSubstate::Started).to_string() {
         let instruction: CTXInstruction = load_object_from(PathBuf::from(tx_file_path))?;
         CoreTransaction::TransferInit {
-            tx: InitializedTx::decode(&mut &instruction.data[..])
+            tx: InitializedTransferTx::decode(&mut &instruction.data[..])
                 .map_err(|_| Error::DecodeError)?,
             sender: user,
             tx_id,
@@ -810,14 +811,16 @@ pub fn load_tx_file(
     } else if state == TxState::Finalization(TxSubstate::Started).to_string() {
         let instruction: CTXInstruction = load_object_from(PathBuf::from(tx_file_path))?;
         CoreTransaction::TransferFinalize {
-            tx: FinalizedTx::decode(&mut &instruction.data[..]).map_err(|_| Error::DecodeError)?,
+            tx: FinalizedTransferTx::decode(&mut &instruction.data[..])
+                .map_err(|_| Error::DecodeError)?,
             receiver: user,
             tx_id,
         }
     } else if state == TxState::Justification(TxSubstate::Started).to_string() {
         let instruction: CTXInstruction = load_object_from(PathBuf::from(tx_file_path))?;
         CoreTransaction::TransferJustify {
-            tx: JustifiedTx::decode(&mut &instruction.data[..]).map_err(|_| Error::DecodeError)?,
+            tx: JustifiedTransferTx::decode(&mut &instruction.data[..])
+                .map_err(|_| Error::DecodeError)?,
             mediator: user,
             tx_id,
         }
