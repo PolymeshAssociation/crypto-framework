@@ -33,9 +33,7 @@ fn load_all_unverified_and_ready(db_dir: PathBuf) -> Result<Vec<CoreTransaction>
 }
 
 pub fn validate_all_pending(db_dir: PathBuf) -> Result<(), Error> {
-    // TODO: based on discussions with Miguel, this function should be called at the same time
-    //       that any justify is called.
-    //       To be fixed in CRYP-TODO
+    // TODO: This function should be called when any justify is called. To be fixed in CRYP-131.
     let all_unverified_and_ready = load_all_unverified_and_ready(db_dir.clone())?;
     let mut last_tx_id: i32 = -1;
 
@@ -114,6 +112,7 @@ pub fn validate_all_pending(db_dir: PathBuf) -> Result<(), Error> {
     }
 
     // TODO: the following loops are stupid, a much more efficient implementation is using HashMaps, but I could not make it work in Rust!!!
+    // To be discussed and fixed in this PR!
 
     // find all users
     let mut users: Vec<String> = vec![];
@@ -160,7 +159,7 @@ pub fn validate_all_pending(db_dir: PathBuf) -> Result<(), Error> {
                             new_balance += amount.clone();
                         } else {
                             // based on the reason and the strategy, we can break the loop or ignore
-                            // TODO: add strategy selection to the config
+                            // TODO: add strategy selection to the config. CRYP-132
                         }
                     }
                     Direction::Outgoing => {

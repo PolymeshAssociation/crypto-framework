@@ -686,9 +686,10 @@ pub fn compute_enc_pending_balance(
     // last_processed_tx_counter == ordering_state.last_processed_tx_counter
     // TODO: implementing the simple case for now where the last processed transaction inside the account
     //       is the same as the last processed transaction inside the last transaction.
+    // The rest of the cases will be handled in CRYP-130
     if last_processed_tx_counter != ordering_state.last_processed_tx_counter {
         return Err(Error::NotImplemented {
-            story: "CRYP-TODO".to_string(),
+            story: "CRYP-130".to_string(),
         });
     }
 
