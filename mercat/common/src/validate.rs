@@ -122,7 +122,6 @@ pub fn validate_all_pending(db_dir: PathBuf) -> Result<(), Error> {
             users.push(result.user);
         }
     }
-    debug!("------------> all users: {:?}", users);
     // find all accounts
     let mut accounts: HashSet<(String, String)> = HashSet::new();
     for user in users {
@@ -132,7 +131,6 @@ pub fn validate_all_pending(db_dir: PathBuf) -> Result<(), Error> {
             }
         }
     }
-    debug!("------------> all accounts: {:?}", accounts);
 
     for (user, ticker) in accounts.clone() {
         let pub_account: PubAccount = load_object(
@@ -162,6 +160,7 @@ pub fn validate_all_pending(db_dir: PathBuf) -> Result<(), Error> {
                             new_balance += amount.clone();
                         } else {
                             // based on the reason and the strategy, we can break the loop or ignore
+                            // TODO: add strategy selection to the config
                         }
                     }
                     Direction::Outgoing => {

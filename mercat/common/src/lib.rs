@@ -17,7 +17,7 @@ use cryptography::mercat::{
 };
 use curve25519_dalek::scalar::Scalar;
 use errors::Error;
-use log::{debug, info};
+use log::{debug, error, info};
 use metrics::Recorder;
 use metrics_core::Key;
 use rand::{rngs::StdRng, Rng, SeedableRng};
@@ -571,7 +571,7 @@ pub fn last_ordering_state_before(
                 let (max_pending, last_processed, last_tx) = acc;
                 match tx {
                     Err(error) => {
-                        debug!("Error while finding the last transaction: {:?}", error);
+                        error!("Error while finding the last transaction: {:?}", error);
                         (ERROR_CASE, ERROR_CASE, CoreTransaction::Invalid)
                     }
                     Ok(tx) => {
@@ -660,13 +660,7 @@ pub fn compute_enc_pending_balance(
             earliest: ordering_state.last_processed_tx_counter,
         });
     }
-    // last_processed_tx_counter > ordering_state.last_processed_tx_counter &&  last_processed_tx_counter > pending -> pending has been skipped
-    // last_processed_tx_counter > ordering_state.last_processed_tx_counter &&  last_processed_tx_counter == pending -> error
-    // last_processed_tx_counter > ordering_state.last_processed_tx_counter &&  last_processed_tx_counter < pending
-    // last_processed_tx_counter == ordering_state.last_processed_tx_counter
-
     let start = ordering_state.last_processed_tx_counter + 1;
-    debug!("------------> start: {}", start);
     let transfer_inits = load_tx_between_counters_for_user(
         sender,
         db_dir.clone(),
@@ -686,6 +680,10 @@ pub fn compute_enc_pending_balance(
         return Ok(enc_balance_in_account);
     }
 
+    // last_processed_tx_counter > ordering_state.last_processed_tx_counter &&  last_processed_tx_counter > pending -> pending has been skipped
+    // last_processed_tx_counter > ordering_state.last_processed_tx_counter &&  last_processed_tx_counter == pending -> error
+    // last_processed_tx_counter > ordering_state.last_processed_tx_counter &&  last_processed_tx_counter < pending
+    // last_processed_tx_counter == ordering_state.last_processed_tx_counter
     // TODO: implementing the simple case for now where the last processed transaction inside the account
     //       is the same as the last processed transaction inside the last transaction.
     if last_processed_tx_counter != ordering_state.last_processed_tx_counter {
@@ -753,7 +751,6 @@ pub fn all_unverified_tx_files(db_dir: PathBuf) -> Result<Vec<String>, Error> {
                         reason: String::from("failed to convert amount to u32."),
                     })?;
                 if tx_id as i32 > start {
-                    debug!("Transaction file: {} is greater than {}", file_name, start);
                     files.push(String::from(
                         path.to_str().ok_or(Error::PathBufConversionError)?,
                     ));
