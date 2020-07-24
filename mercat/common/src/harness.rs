@@ -361,37 +361,6 @@ impl Transfer {
         });
     }
 
-    //pub fn validate(&self, chain_db_dir: PathBuf) -> StepFunc {
-    //    let value = format!(
-    //        "tx-{}: $ mercat-validator validate-transaction --sender {} --receiver {} --mediator {} \
-    //        --account-id-from-ticker {} --tx-id {} --db-dir {}",
-    //        self.tx_id,
-    //        self.sender.name,
-    //        self.receiver.name,
-    //        self.mediator.name,
-    //        self.ticker,
-    //        self.tx_id,
-    //        path_to_string(&chain_db_dir),
-    //    );
-    //    let sender = self.sender.name.clone();
-    //    let receiver = self.receiver.name.clone();
-    //    let mediator = self.mediator.name.clone();
-    //    let tx_id = self.tx_id;
-    //    let ticker = self.ticker.clone();
-    //    return Box::new(move || {
-    //        info!("Running: {}", value.clone());
-    //        validate_transaction(
-    //            chain_db_dir.clone(),
-    //            sender.clone(),
-    //            receiver.clone(),
-    //            mediator.clone(),
-    //            tx_id,
-    //            ticker.clone(),
-    //        )?;
-    //        Ok(value.clone())
-    //    });
-    //}
-
     pub fn operations_order<T: RngCore + CryptoRng>(
         &self,
         rng: &mut T,
@@ -401,7 +370,6 @@ impl Transfer {
             self.send(rng, chain_db_dir.clone()),
             self.receive(rng, chain_db_dir.clone()),
             self.mediate(chain_db_dir.clone()),
-            //self.validate(chain_db_dir),
         ]
     }
 }

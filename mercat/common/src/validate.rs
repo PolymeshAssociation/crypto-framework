@@ -295,15 +295,6 @@ pub fn validate_asset_issuance(
         return ValidationResult::error(&issuer, &ticker);
     }
 
-    //// Save the updated issuer account.
-    //save_object(
-    //    db_dir,
-    //    ON_CHAIN_DIR,
-    //    &issuer,
-    //    &user_public_account_file(&ticker),
-    //    &updated_issuer_account,
-    //)?;
-
     timing!(
         "validator.issuance.save_objects",
         save_objects_timer,

@@ -286,7 +286,7 @@ pub fn process_finalize_tx(
 
     if cheat && cheating_strategy == 1 {
         info!(
-            "CLI log: tx-{}: Cheating by changing the sender's account id. Correct account id: {}",
+            "CLI log: tx-{}: Cheating by changing the receiver's account id. Correct account id: {}",
             tx_id, receiver_account.pblc.id
         );
         asset_tx.content.init_data.content.memo.rcvr_account_id += 1;

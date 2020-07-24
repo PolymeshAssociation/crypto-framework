@@ -33,10 +33,10 @@ pub fn process_create_account(
     cheat: bool,
     tx_id: u32,
 ) -> Result<(), Error> {
-    // Setup the rng
+    // Setup the rng.
     let mut rng = create_rng_from_seed(seed)?;
 
-    // Create the account
+    // Create the account.
     let secret_account = create_secret_account(&mut rng, ticker.clone())?;
     let valid_asset_ids = get_asset_ids(db_dir.clone())?;
     let account_id = calc_account_id(user.clone(), ticker.clone());
