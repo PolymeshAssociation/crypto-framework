@@ -38,7 +38,6 @@ pub fn validate_all_pending(db_dir: PathBuf) -> Result<(), Error> {
     //       To be fixed in CRYP-TODO
     let all_unverified_and_ready = load_all_unverified_and_ready(db_dir.clone())?;
     let mut last_tx_id: i32 = -1;
-    debug!("----> Read all the unverified transactions!");
 
     let mut results: Vec<ValidationResult> = vec![];
     // For each of them call the validate function and process as needed
@@ -51,16 +50,6 @@ pub fn validate_all_pending(db_dir: PathBuf) -> Result<(), Error> {
             } => {
                 let result =
                     validate_asset_issuance(db_dir.clone(), issue_tx.clone(), mediator, tx_id);
-                let account_id = issue_tx.content.content.account_id;
-                debug!(
-                    "------------> validating tx: {}, pending issued balance: {}",
-                    tx_id,
-                    debug_decrypt(account_id, result.amount.unwrap(), db_dir.clone())?
-                );
-                debug!(
-                    "--> {} {} {:?}",
-                    result.user, result.ticker, result.direction
-                );
                 results.push(result);
                 last_tx_id = std::cmp::max(last_tx_id, tx_id as i32);
             }
@@ -109,7 +98,13 @@ pub fn validate_all_pending(db_dir: PathBuf) -> Result<(), Error> {
                 last_tx_id = std::cmp::max(last_tx_id, tx_id as i32);
             }
             CoreTransaction::Account { account_tx, tx_id } => {
-                validate_account(db_dir.clone(), account_tx.content.pub_account.id)?;
+                match validate_account(db_dir.clone(), account_tx.content.pub_account.id) {
+                    Err(error) => {
+                        error!("Error in validation: {:#?}", error);
+                        info!("Ignoring the validation error and continuing the with rest of the validations.");
+                    }
+                    Ok(_) => (),
+                };
                 last_tx_id = std::cmp::max(last_tx_id, tx_id as i32);
             }
             _ => {

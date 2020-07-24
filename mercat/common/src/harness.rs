@@ -13,7 +13,7 @@ use crate::{
 };
 use cryptography::mercat::{Account, PubAccount, SecAccount};
 use linked_hash_map::LinkedHashMap;
-use log::{info, warn};
+use log::{error, info, warn};
 use rand::Rng;
 use rand::{rngs::StdRng, SeedableRng};
 use rand::{CryptoRng, RngCore};
@@ -227,9 +227,6 @@ pub struct TestCase {
 
     /// The directory that will act as the chain datastore.
     chain_db_dir: PathBuf,
-
-    /// Defines whether the test is expected to fail.
-    should_fail: bool,
 }
 
 // --------------------------------------------------------------------------------------------------
@@ -635,8 +632,13 @@ impl TestCase {
             .transactions
             .sequence(&mut rng, self.chain_db_dir.clone())
         {
-            let _command = transaction()?;
-            info!("Success!");
+            match transaction() {
+                Err(error) => {
+                    error!("Error in transaction: {:#?}", error);
+                    info!("Ignoring the error and continuing with the rest of the transactions.");
+                }
+                Ok(_) => info!("Success!"),
+            }
         }
 
         self.resulting_accounts()
@@ -949,38 +951,34 @@ fn parse_config(path: PathBuf, chain_db_dir: PathBuf) -> Result<TestCase, Error>
 
     let mut accounts_outcome: HashSet<InputAccount> = HashSet::new();
     let outcomes = to_array(&config["outcome"], path.clone(), "outcome")?;
-    let mut should_fail = false;
     for outcome in outcomes {
         let outcome_type = to_hash(&outcome, path.clone(), "outcome.key")?;
         for (key, value) in outcome_type {
             let key = to_string(key, path.clone(), "outcome.key")?;
-            if key == "should-fail" {
-                should_fail = true
-            } else {
-                let accounts_for_user =
-                    to_array(&value, path.clone(), &format!("outcome.{}.ticker", key))?;
-                let owner: &str = &key.clone();
-                for accounts in accounts_for_user {
-                    let accounts =
-                        to_hash(&accounts, path.clone(), &format!("outcome.{}.ticker", key))?;
-                    for (ticker, amount) in accounts {
-                        let ticker = to_string(
-                            &ticker,
-                            path.clone(),
-                            &format!("outcome.{}.ticker", owner.clone()),
-                        )?;
-                        let balance =
-                            amount
-                                .as_i64()
-                                .ok_or(Error::ErrorParsingTestHarnessConfig {
-                                    path: path.clone(),
-                                    reason: format!(
-                                        "failed to convert expect amount for outcome.{}.{}",
-                                        owner.clone(),
-                                        ticker.clone()
-                                    ),
-                                })?;
-                        let balance = u32::try_from(balance).map_err(|_| Error::BalanceTooBig)?;
+            let accounts_for_user =
+                to_array(&value, path.clone(), &format!("outcome.{}.ticker", key))?;
+            let owner: &str = &key.clone();
+            for accounts in accounts_for_user {
+                let accounts =
+                    to_hash(&accounts, path.clone(), &format!("outcome.{}.ticker", key))?;
+                for (ticker, amount) in accounts {
+                    let ticker = to_string(
+                        &ticker,
+                        path.clone(),
+                        &format!("outcome.{}.ticker", owner.clone()),
+                    )?;
+                    let balance = amount
+                        .as_i64()
+                        .ok_or(Error::ErrorParsingTestHarnessConfig {
+                            path: path.clone(),
+                            reason: format!(
+                                "failed to convert expect amount for outcome.{}.{}",
+                                owner.clone(),
+                                ticker.clone()
+                            ),
+                        })?;
+                    let balance = u32::try_from(balance).map_err(|_| Error::BalanceTooBig)?;
+                    if ticker != "NONE" {
                         accounts_outcome.insert(InputAccount {
                             owner: Party::try_from(owner.clone())?,
                             ticker: Some(ticker.clone()),
@@ -1018,7 +1016,6 @@ fn parse_config(path: PathBuf, chain_db_dir: PathBuf) -> Result<TestCase, Error>
         transactions,
         accounts_outcome,
         chain_db_dir,
-        should_fail,
     })
 }
 
@@ -1058,38 +1055,23 @@ fn run_from(mode: &str) {
             info!("----------------------------------------------------------------------------------");
             let want = &testcase.accounts_outcome;
             let got = testcase.run();
-            if testcase.should_fail {
-                if let Err(error) = got {
-                    match error {
-                        Error::LibraryError { error: lib_error } => {
-                            info!("Testcase passed! Since the library correctly reject the transaction with error: {:#?}", lib_error);
-                        }
-                        _ => {
-                            assert!(false, format!("Test failed for the wrong reason. Expected mercat library error, but got: {:#?}.", error));
-                        }
-                    }
-                } else {
-                    assert!(false, "Test succeed, but it was expected to fail.");
-                }
+            if let Err(error) = got {
+                assert!(
+                    false,
+                    format!(
+                        "Test was expected to succeed, but failed with {:#?}.",
+                        error
+                    )
+                );
             } else {
-                if let Err(error) = got {
-                    assert!(
-                        false,
-                        format!(
-                            "Test was expected to succeed, but failed with {:#?}.",
-                            error
-                        )
-                    );
-                } else {
-                    let got = got.unwrap();
-                    assert!(
-                        accounts_are_equal(want, &got),
-                        format!(
-                            "Test failed due to account value mismatch.\nWant: {:#?}, got: {:#?}",
-                            want, got
-                        )
-                    );
-                }
+                let got = got.unwrap();
+                assert!(
+                    accounts_are_equal(want, &got),
+                    format!(
+                        "Test failed due to account value mismatch.\nWant: {:#?}, got: {:#?}",
+                        want, got
+                    )
+                );
             }
         }
     }

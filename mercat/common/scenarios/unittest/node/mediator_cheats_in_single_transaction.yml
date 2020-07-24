@@ -15,8 +15,14 @@ mediators:
     
 transactions:
   - sequence:
+    - validate
     - Alice 50 ACME Mike approve
+    - validate
     - Alice 30 ACME Bob approve Mike(cheat) approve
+    - validate
 
 outcome: 
-  - should-fail: true
+  - alice:
+    - ACME: 50
+  - bob:
+    - ACME: 0

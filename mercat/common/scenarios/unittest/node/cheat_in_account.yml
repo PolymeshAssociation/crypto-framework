@@ -13,4 +13,5 @@ transactions:
   - validate
 
 outcome: 
-  - should-fail: true
+  - alice:
+    - NONE: 0
