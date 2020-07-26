@@ -1,8 +1,8 @@
 use crate::{
-    asset_transaction_file, confidential_transaction_file, construct_path, create_rng_from_seed,
-    errors::Error, load_object, save_object, user_public_account_file, CTXInstruction, Instruction,
-    COMMON_OBJECTS_DIR, MEDIATOR_PUBLIC_ACCOUNT_FILE, OFF_CHAIN_DIR, ON_CHAIN_DIR,
-    SECRET_ACCOUNT_FILE,
+    asset_transaction_file, compute_enc_pending_balance, confidential_transaction_file,
+    construct_path, create_rng_from_seed, errors::Error, last_ordering_state_before, load_object,
+    save_object, user_public_account_file, CTXInstruction, Instruction, COMMON_OBJECTS_DIR,
+    MEDIATOR_PUBLIC_ACCOUNT_FILE, OFF_CHAIN_DIR, ON_CHAIN_DIR, SECRET_ACCOUNT_FILE,
 };
 use codec::{Decode, Encode};
 use cryptography::{
@@ -81,7 +81,7 @@ pub fn process_create_mediator(seed: String, db_dir: PathBuf, user: String) -> R
     Ok(())
 }
 
-pub fn justify_asset_issuance(
+pub fn justify_asset_issuance_transaction(
     db_dir: PathBuf,
     issuer: String,
     mediator: String,
@@ -146,6 +146,7 @@ pub fn justify_asset_issuance(
             &issuer_account,
             &mediator_account.encryption_key,
             &mediator_account.signing_key,
+            &[],
         )
         .map_err(|error| Error::LibraryError { error })?;
 
@@ -228,18 +229,20 @@ pub fn justify_asset_issuance(
     Ok(())
 }
 
-pub fn justify_asset_transaction(
+pub fn justify_asset_transfer_transaction(
     db_dir: PathBuf,
     sender: String,
     receiver: String,
     mediator: String,
     ticker: String,
+    seed: String,
     tx_id: u32,
     reject: bool,
     cheat: bool,
 ) -> Result<(), Error> {
     // Load the transaction, mediator's credentials, and issuer's public account.
     let justify_load_objects_timer = Instant::now();
+    let mut rng = create_rng_from_seed(Some(seed))?;
 
     let instruction_path =
         confidential_transaction_file(tx_id, &sender, TxState::Finalization(TxSubstate::Started));
@@ -291,15 +294,38 @@ pub fn justify_asset_transaction(
 
     // Justification.
     let justify_library_timer = Instant::now();
+
+    // Calculate the pending
+    let last_processed_tx_counter = sender_account.memo.last_processed_tx_counter;
+    let last_processed_account_balance = sender_account.enc_balance;
+    let ordering_state = last_ordering_state_before(
+        sender.clone(),
+        last_processed_tx_counter,
+        tx_id,
+        tx_id,
+        db_dir.clone(),
+    )?;
+
+    let pending_balance = compute_enc_pending_balance(
+        &sender,
+        ordering_state,
+        last_processed_tx_counter,
+        last_processed_account_balance,
+        db_dir.clone(),
+    )?;
+
     let asset_id = asset_id_from_ticker(&ticker).map_err(|error| Error::LibraryError { error })?;
     let mut justified_tx = CtxMediator {}
         .justify_transaction(
             asset_tx.clone(),
             &mediator_account.encryption_key,
             &mediator_account.signing_key,
-            &sender_account.memo.owner_sign_pub_key,
-            &receiver_account.memo.owner_sign_pub_key,
+            &sender_account,
+            &receiver_account,
+            pending_balance,
+            &[],
             asset_id,
+            &mut rng,
         )
         .map_err(|error| Error::LibraryError { error })?;
 

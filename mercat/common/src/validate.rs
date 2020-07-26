@@ -261,6 +261,7 @@ pub fn validate_asset_issuance(
             issuer_account,
             &mediator_account.owner_enc_pub_key,
             &mediator_account.owner_sign_pub_key,
+            &[],
         )
         .map_err(|error| Error::LibraryError { error })
     {
@@ -377,6 +378,7 @@ fn process_transaction(
             receiver_pub_account,
             &mdtr_account.owner_sign_pub_key,
             pending_balance,
+            &[],
             &mut rng,
         )
         .map_err(|error| Error::LibraryError { error })?;

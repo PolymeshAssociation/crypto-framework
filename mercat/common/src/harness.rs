@@ -6,7 +6,10 @@ use crate::{
     create_rng_from_seed,
     errors::Error,
     gen_seed, gen_seed_from,
-    justify::{justify_asset_issuance, justify_asset_transaction, process_create_mediator},
+    justify::{
+        justify_asset_issuance_transaction, justify_asset_transfer_transaction,
+        process_create_mediator,
+    },
     load_object, user_public_account_file, user_secret_account_file,
     validate::validate_all_pending,
     COMMON_OBJECTS_DIR, OFF_CHAIN_DIR, ON_CHAIN_DIR,
@@ -326,15 +329,17 @@ impl Transfer {
         });
     }
 
-    pub fn mediate(&self, chain_db_dir: PathBuf) -> StepFunc {
+    pub fn mediate<T: RngCore + CryptoRng>(&self, rng: &mut T, chain_db_dir: PathBuf) -> StepFunc {
+        let seed = gen_seed_from(rng);
         let value = format!(
-            "tx-{}: $ mercat-mediator justify-transaction --sender {} --receiver {} --mediator {} --ticker {} --tx-id {} --db-dir {} {}",
+            "tx-{}: $ mercat-mediator justify-transaction --sender {} --receiver {} --mediator {} --ticker {} --tx-id {} --seed {} --db-dir {} {}",
             self.tx_id,
             self.sender.name,
             self.receiver.name,
             self.mediator.name,
             self.ticker,
             self.tx_id,
+            seed,
             path_to_string(&chain_db_dir),
             cheater_flag(self.mediator.cheater)
         );
@@ -347,12 +352,13 @@ impl Transfer {
         let cheat = self.mediator.cheater;
         return Box::new(move || {
             info!("Running: {}", value.clone());
-            justify_asset_transaction(
+            justify_asset_transfer_transaction(
                 chain_db_dir.clone(),
                 sender.clone(),
                 receiver.clone(),
                 mediator.clone(),
                 ticker.clone(),
+                seed.clone(),
                 tx_id,
                 reject,
                 cheat,
@@ -369,7 +375,7 @@ impl Transfer {
         vec![
             self.send(rng, chain_db_dir.clone()),
             self.receive(rng, chain_db_dir.clone()),
-            self.mediate(chain_db_dir.clone()),
+            self.mediate(rng, chain_db_dir.clone()),
         ]
     }
 }
@@ -493,7 +499,7 @@ impl Issue {
         let cheat = self.mediator.cheater;
         return Box::new(move || {
             info!("Running: {}", value.clone());
-            justify_asset_issuance(
+            justify_asset_issuance_transaction(
                 chain_db_dir.clone(),
                 issuer.clone(),
                 mediator.clone(),

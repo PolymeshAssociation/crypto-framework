@@ -131,6 +131,7 @@ pub fn process_create_tx(
             &receiver_account,
             &mediator_account.owner_enc_pub_key,
             pending_balance,
+            &[],
             amount,
             next_pending_tx_counter,
             &mut rng,

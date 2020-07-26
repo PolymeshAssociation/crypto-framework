@@ -109,6 +109,7 @@ pub fn process_issue_asset(
             tx_id,
             &issuer_account,
             &mediator_account.owner_enc_pub_key,
+            &[],
             amount,
             next_pending_tx_counter,
             &mut rng,
