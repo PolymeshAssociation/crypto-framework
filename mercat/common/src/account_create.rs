@@ -52,7 +52,7 @@ pub fn process_create_account(
             &mut rng,
         )
         .map_err(|error| Error::LibraryError { error })?;
-    timing!("account.call_library", create_account_timer, Instant::now());
+    timing!("account.call_library", create_account_timer, Instant::now(), "tx_id" => tx_id.to_string());
     if cheat {
         // To simplify the cheating selection process, we randomly choose a cheating strategy,
         // instead of requiring the caller to know of all the different cheating strategies.
@@ -108,7 +108,7 @@ pub fn process_create_account(
 
     update_account_map(db_dir, user, ticker, account_id, tx_id)?;
 
-    timing!("account.save_output", save_to_file_timer, Instant::now());
+    timing!("account.save_output", save_to_file_timer, Instant::now(), "tx_id" => tx_id.to_string());
 
     Ok(())
 }

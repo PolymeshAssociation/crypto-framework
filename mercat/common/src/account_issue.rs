@@ -34,9 +34,8 @@ pub fn process_issue_asset(
     cheat: bool,
 ) -> Result<(), Error> {
     let mut rng = create_rng_from_seed(Some(seed))?;
-    let load_from_file_timer = Instant::now();
 
-    //calc_account_id(issuer.clone(), ticker.clone()),
+    let load_from_file_timer = Instant::now();
     let issuer_account = Account {
         pblc: load_object(
             db_dir.clone(),
@@ -62,7 +61,8 @@ pub fn process_issue_asset(
     timing!(
         "account.issue_asset.load_from_file",
         load_from_file_timer,
-        Instant::now()
+        Instant::now(),
+        "tx_id" => tx_id.to_string()
     );
 
     // Calculate the pending
@@ -79,7 +79,8 @@ pub fn process_issue_asset(
     timing!(
         "account.finalize_tx.calc_pending_state",
         calc_pending_state_timer,
-        Instant::now()
+        Instant::now(),
+        "tx_id" => tx_id.to_string()
     );
 
     let mut amount = amount;
@@ -163,7 +164,8 @@ pub fn process_issue_asset(
     timing!(
         "account.issue_asset.save_to_file",
         save_to_file_timer,
-        Instant::now()
+        Instant::now(),
+        "tx_id" => tx_id.to_string()
     );
 
     Ok(())

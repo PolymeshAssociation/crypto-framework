@@ -67,7 +67,8 @@ pub fn process_create_tx(
     timing!(
         "account.create_tx.load_from_file",
         load_from_file_timer,
-        Instant::now()
+        Instant::now(),
+        "tx_id" => tx_id.to_string()
     );
 
     // Calculate the pending
@@ -103,7 +104,8 @@ pub fn process_create_tx(
     timing!(
         "account.create_tx.calc_pending_state",
         calc_pending_state_timer,
-        Instant::now()
+        Instant::now(),
+        "tx_id" => tx_id.to_string()
     );
 
     let mut amount = amount;
@@ -157,9 +159,6 @@ pub fn process_create_tx(
         data: asset_tx.encode().to_vec(),
     };
 
-    // TODO(CRYP-127)
-    // We should name the transactions based on the ordering counters, or we may decide that
-    // a global counter (tx_id) is enough and put all transactions inside a common folder.
     save_object(
         db_dir,
         ON_CHAIN_DIR,
@@ -235,7 +234,8 @@ pub fn process_finalize_tx(
     timing!(
         "account.finalize_tx.load_from_file",
         load_from_file_timer,
-        Instant::now()
+        Instant::now(),
+        "tx_id" => tx_id.to_string()
     );
 
     // Calculate the pending
@@ -252,7 +252,8 @@ pub fn process_finalize_tx(
     timing!(
         "account.finalize_tx.calc_pending_state",
         calc_pending_state_timer,
-        Instant::now()
+        Instant::now(),
+        "tx_id" => tx_id.to_string()
     );
 
     let mut amount = amount;
@@ -301,7 +302,8 @@ pub fn process_finalize_tx(
     timing!(
         "account.finalize_tx.finalize_by_receiver",
         finalize_by_receiver_timer,
-        Instant::now()
+        Instant::now(),
+        "tx_id" => tx_id.to_string()
     );
 
     // Save the artifacts to file.
@@ -312,9 +314,6 @@ pub fn process_finalize_tx(
         data: asset_tx.encode().to_vec(),
     };
 
-    // TODO(CRYP-127)
-    // We should name the transactions based on the ordering counters, or we may decide that
-    // a global counter (tx_id) is enough and put all transactions inside a common folder.
     save_object(
         db_dir,
         ON_CHAIN_DIR,
@@ -326,7 +325,8 @@ pub fn process_finalize_tx(
     timing!(
         "account.finalize_tx.save_to_file",
         save_to_file_timer,
-        Instant::now()
+        Instant::now(),
+        "tx_id" => tx_id.to_string()
     );
 
     Ok(())

@@ -1058,9 +1058,20 @@ fn run_from(mode: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::init_print_logger;
     use env_logger;
     use log::debug;
+    use std::sync::Once;
     use wasm_bindgen_test::*;
+
+    static INIT: Once = Once::new();
+
+    pub fn initialize() {
+        INIT.call_once(|| {
+            env_logger::init();
+            init_print_logger();
+        });
+    }
 
     fn cleanup_previous_run(mode: &str) {
         let mut chain_db_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -1072,13 +1083,14 @@ mod tests {
 
     #[test]
     fn test_on_slow_pc() {
-        env_logger::init();
+        initialize();
         cleanup_previous_run("pc");
         run_from("pc");
     }
 
     #[test]
     fn test_on_fast_node() {
+        initialize();
         cleanup_previous_run("node");
         run_from("node");
     }

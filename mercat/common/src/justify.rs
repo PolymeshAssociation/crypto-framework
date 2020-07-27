@@ -54,7 +54,12 @@ pub fn process_create_mediator(seed: String, db_dir: PathBuf, user: String) -> R
     // Generate keys for the mediator.
     let mediator_key_gen_timer = Instant::now();
     let (public_account, private_account) = generate_mediator_keys(&mut rng);
-    timing!("mediator.key_gen", mediator_key_gen_timer, Instant::now());
+    timing!(
+        "mediator.key_gen",
+        mediator_key_gen_timer,
+        Instant::now(),
+        "tx_id" => "N/A"
+    );
 
     let mediator_save_keys_timer = Instant::now();
     save_object(
@@ -75,7 +80,8 @@ pub fn process_create_mediator(seed: String, db_dir: PathBuf, user: String) -> R
     timing!(
         "mediator.save_keys",
         mediator_save_keys_timer,
-        Instant::now()
+        Instant::now(),
+        "tx_id" => "N/A"
     );
 
     Ok(())
@@ -135,7 +141,8 @@ pub fn justify_asset_issuance_transaction(
     timing!(
         "mediator.justify_load_objects",
         justify_load_objects_timer,
-        Instant::now()
+        Instant::now(),
+        "tx_id" => tx_id.to_string()
     );
 
     // Justification.
@@ -176,7 +183,8 @@ pub fn justify_asset_issuance_transaction(
     timing!(
         "mediator.justify_library",
         justify_library_timer,
-        Instant::now()
+        Instant::now(),
+        "tx_id" => tx_id.to_string()
     );
 
     let next_instruction;
@@ -223,7 +231,8 @@ pub fn justify_asset_issuance_transaction(
     timing!(
         "mediator.justify_save_objects",
         justify_save_objects_timer,
-        Instant::now()
+        Instant::now(),
+        "tx_id" => tx_id.to_string()
     );
 
     Ok(())
@@ -289,7 +298,8 @@ pub fn justify_asset_transfer_transaction(
     timing!(
         "mediator.justify_tx.load_objects",
         justify_load_objects_timer,
-        Instant::now()
+        Instant::now(),
+        "tx_id" => tx_id.to_string()
     );
 
     // Justification.
@@ -352,7 +362,8 @@ pub fn justify_asset_transfer_transaction(
     timing!(
         "mediator.justify_tx.library",
         justify_library_timer,
-        Instant::now()
+        Instant::now(),
+        "tx_id" => tx_id.to_string()
     );
 
     let next_instruction;
@@ -392,7 +403,8 @@ pub fn justify_asset_transfer_transaction(
     timing!(
         "mediator.justify_tx.save_objects",
         justify_save_objects_timer,
-        Instant::now()
+        Instant::now(),
+        "tx_id" => tx_id.to_string()
     );
 
     Ok(())

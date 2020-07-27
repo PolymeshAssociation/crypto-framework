@@ -98,8 +98,8 @@ pub fn validate_all_pending(db_dir: PathBuf) -> Result<(), Error> {
             CoreTransaction::Account { account_tx, tx_id } => {
                 match validate_account(db_dir.clone(), account_tx.content.pub_account.id) {
                     Err(error) => {
-                        error!("Error in validation: {:#?}", error);
-                        info!("Ignoring the validation error and continuing the with rest of the validations.");
+                        error!("Error in validation of tx-{}: {:#?}", tx_id, error);
+                        info!("tx-{}: Ignoring the validation error and continuing the with rest of the validations.", tx_id);
                     }
                     Ok(_) => (),
                 };
@@ -214,7 +214,7 @@ pub fn validate_asset_issuance(
     let issuer_account_id = asset_tx.content.content.account_id;
     let res = get_user_ticker_from(issuer_account_id, db_dir.clone());
     if let Err(error) = res {
-        error!("Error in validation: {:#?}", error);
+        error!("Error in validation of tx-{}: {:#?}", tx_id, error);
         return ValidationResult::error("n/a", "n/a");
     }
     let (issuer, ticker, _) = res.unwrap();
@@ -229,7 +229,7 @@ pub fn validate_asset_issuance(
         MEDIATOR_PUBLIC_ACCOUNT_FILE,
     );
     if let Err(error) = mediator_account {
-        error!("Error in validation: {:#?}", error);
+        error!("Error in validation of tx-{}: {:#?}", tx_id, error);
         return ValidationResult::error(&issuer, &ticker);
     }
     let mediator_account = mediator_account.unwrap();
@@ -241,7 +241,7 @@ pub fn validate_asset_issuance(
         &user_public_account_file(&ticker),
     );
     if let Err(error) = issuer_account {
-        error!("Error in validation: {:#?}", error);
+        error!("Error in validation of tx-{}: {:#?}", tx_id, error);
         return ValidationResult::error(&issuer, &ticker);
     }
     let issuer_account = issuer_account.unwrap();
@@ -249,7 +249,8 @@ pub fn validate_asset_issuance(
     timing!(
         "validator.issuance.load_objects",
         load_objects_timer,
-        Instant::now()
+        Instant::now(),
+        "tx_id" => tx_id.to_string()
     );
 
     let validate_issuance_transaction_timer = Instant::now();
@@ -266,7 +267,7 @@ pub fn validate_asset_issuance(
         .map_err(|error| Error::LibraryError { error })
     {
         Err(error) => {
-            error!("Error in validation: {:#?}", error);
+            error!("Error in validation of tx-{}: {:#?}", tx_id, error);
             return ValidationResult::error(&issuer, &ticker);
         }
         Ok(pub_account) => pub_account,
@@ -275,7 +276,8 @@ pub fn validate_asset_issuance(
     timing!(
         "validator.issuance.transaction",
         validate_issuance_transaction_timer,
-        Instant::now()
+        Instant::now(),
+        "tx_id" => tx_id.to_string()
     );
 
     let save_objects_timer = Instant::now();
@@ -292,14 +294,15 @@ pub fn validate_asset_issuance(
         &asset_transaction_file(tx_id, &issuer, new_state),
         &instruction,
     ) {
-        error!("Error in validation: {:#?}", error);
+        error!("Error in validation of tx-{}: {:#?}", tx_id, error);
         return ValidationResult::error(&issuer, &ticker);
     }
 
     timing!(
         "validator.issuance.save_objects",
         save_objects_timer,
-        Instant::now()
+        Instant::now(),
+        "tx_id" => tx_id.to_string()
     );
 
     ValidationResult {
@@ -316,8 +319,8 @@ pub fn validate_account(db_dir: PathBuf, account_id: u32) -> Result<(), Error> {
 
     let (user, ticker, tx_id) = get_user_ticker_from(account_id, db_dir.clone())?;
     info!(
-        "Validating account{{id: {}, user: {}, ticker: {}}}",
-        account_id, user, ticker
+        "Validating account{{tx_id: {}, account_id: {}, user: {}, ticker: {}}}",
+        tx_id, account_id, user, ticker
     );
     let user_account: PubAccountTx = load_object(
         db_dir.clone(),
@@ -330,7 +333,8 @@ pub fn validate_account(db_dir: PathBuf, account_id: u32) -> Result<(), Error> {
     timing!(
         "validator.account.load_objects",
         load_objects_timer,
-        Instant::now()
+        Instant::now(),
+        "tx_id" => tx_id.to_string()
     );
 
     // Validate the account.
@@ -340,7 +344,12 @@ pub fn validate_account(db_dir: PathBuf, account_id: u32) -> Result<(), Error> {
         .verify(&user_account, &valid_asset_ids)
         .map_err(|error| Error::LibraryError { error })?;
 
-    timing!("validator.account", validate_account_timer, Instant::now());
+    timing!(
+        "validator.account",
+        validate_account_timer,
+        Instant::now(),
+        "tx_id" => tx_id.to_string()
+    );
 
     // On success save the public account as validated.
     let save_objects_timer = Instant::now();
@@ -355,7 +364,8 @@ pub fn validate_account(db_dir: PathBuf, account_id: u32) -> Result<(), Error> {
     timing!(
         "validator.account.save_objects",
         save_objects_timer,
-        Instant::now()
+        Instant::now(),
+        "tx_id" => tx_id.to_string()
     );
 
     Ok(())
@@ -401,7 +411,7 @@ pub fn validate_transaction(
         db_dir.clone(),
     ) {
         Err(error) => {
-            error!("Error in validation: {:#?}", error);
+            error!("Error in validation of tx-{}: {:#?}", tx_id, error);
             return (
                 ValidationResult::error("n/a", "n/a"),
                 ValidationResult::error("n/a", "n/a"),
@@ -415,7 +425,7 @@ pub fn validate_transaction(
         db_dir.clone(),
     ) {
         Err(error) => {
-            error!("Error in validation: {:#?}", error);
+            error!("Error in validation of tx-{}: {:#?}", tx_id, error);
             return (
                 ValidationResult::error("n/a", "n/a"),
                 ValidationResult::error("n/a", "n/a"),
@@ -437,7 +447,7 @@ pub fn validate_transaction(
         &confidential_transaction_file(tx_id, &mediator, state),
     ) {
         Err(error) => {
-            error!("Error in validation: {:#?}", error);
+            error!("Error in validation of tx-{}: {:#?}", tx_id, error);
             return (
                 ValidationResult::error(&sender, &ticker),
                 ValidationResult::error(&receiver, &ticker),
@@ -453,7 +463,7 @@ pub fn validate_transaction(
         MEDIATOR_PUBLIC_ACCOUNT_FILE,
     ) {
         Err(error) => {
-            error!("Error in validation: {:#?}", error);
+            error!("Error in validation of tx-{}: {:#?}", tx_id, error);
             return (
                 ValidationResult::error(&sender, &ticker),
                 ValidationResult::error(&receiver, &ticker),
@@ -469,7 +479,7 @@ pub fn validate_transaction(
         &user_public_account_file(&ticker),
     ) {
         Err(error) => {
-            error!("Error in validation: {:#?}", error);
+            error!("Error in validation of tx-{}: {:#?}", tx_id, error);
             return (
                 ValidationResult::error(&sender, &ticker),
                 ValidationResult::error(&receiver, &ticker),
@@ -485,7 +495,7 @@ pub fn validate_transaction(
         &user_public_account_file(&ticker),
     ) {
         Err(error) => {
-            error!("Error in validation: {:#?}", error);
+            error!("Error in validation of tx-{}: {:#?}", tx_id, error);
             return (
                 ValidationResult::error(&sender, &ticker),
                 ValidationResult::error(&receiver, &ticker),
@@ -497,7 +507,8 @@ pub fn validate_transaction(
     timing!(
         "validator.issuance.load_objects",
         load_objects_timer,
-        Instant::now()
+        Instant::now(),
+        "tx_id" => tx_id.to_string()
     );
 
     let validate_transaction_timer = Instant::now();
@@ -509,7 +520,7 @@ pub fn validate_transaction(
         pending_balance,
     ) {
         Err(error) => {
-            error!("Error in validation: {:#?}", error);
+            error!("Error in validation of tx-{}: {:#?}", tx_id, error);
             return (
                 ValidationResult::error(&sender, &ticker),
                 ValidationResult::error(&receiver, &ticker),
@@ -521,7 +532,8 @@ pub fn validate_transaction(
     timing!(
         "validator.transaction",
         validate_transaction_timer,
-        Instant::now()
+        Instant::now(),
+        "tx_id" =>  tx_id.to_string()
     );
 
     let save_objects_timer = Instant::now();
@@ -534,7 +546,7 @@ pub fn validate_transaction(
         &confidential_transaction_file(tx_id, &sender, instruction.state),
         &instruction,
     ) {
-        error!("Error in validation: {:#?}", error);
+        error!("Error in validation of tx-{}: {:#?}", tx_id, error);
         return (
             ValidationResult::error(&sender, &ticker),
             ValidationResult::error(&receiver, &ticker),
@@ -544,7 +556,8 @@ pub fn validate_transaction(
     timing!(
         "validator.issuance.save_objects",
         save_objects_timer,
-        Instant::now()
+        Instant::now(),
+        "tx_id" => tx_id.to_string()
     );
 
     (
