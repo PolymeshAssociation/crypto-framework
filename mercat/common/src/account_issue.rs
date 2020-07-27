@@ -1,7 +1,8 @@
 use crate::{
     asset_transaction_file, create_rng_from_seed, errors::Error, last_ordering_state_before,
-    load_object, save_object, user_public_account_file, user_secret_account_file, Instruction,
-    COMMON_OBJECTS_DIR, MEDIATOR_PUBLIC_ACCOUNT_FILE, OFF_CHAIN_DIR, ON_CHAIN_DIR,
+    load_object, save_object, user_public_account_file, user_secret_account_file,
+    OrderedAssetInstruction, OrderedPubAccount, OrderingState, COMMON_OBJECTS_DIR,
+    MEDIATOR_PUBLIC_ACCOUNT_FILE, OFF_CHAIN_DIR, ON_CHAIN_DIR,
 };
 use codec::Encode;
 use cryptography::{
@@ -36,13 +37,14 @@ pub fn process_issue_asset(
     let mut rng = create_rng_from_seed(Some(seed))?;
 
     let load_from_file_timer = Instant::now();
+    let issuer_ordered_pub_account: OrderedPubAccount = load_object(
+        db_dir.clone(),
+        ON_CHAIN_DIR,
+        &issuer,
+        &user_public_account_file(&ticker),
+    )?;
     let issuer_account = Account {
-        pblc: load_object(
-            db_dir.clone(),
-            ON_CHAIN_DIR,
-            &issuer,
-            &user_public_account_file(&ticker),
-        )?,
+        pblc: issuer_ordered_pub_account.pub_account,
         scrt: load_object(
             db_dir.clone(),
             OFF_CHAIN_DIR,
@@ -69,7 +71,7 @@ pub fn process_issue_asset(
     let calc_pending_state_timer = Instant::now();
     let ordering_state = last_ordering_state_before(
         issuer.clone(),
-        issuer_account.pblc.memo.last_processed_tx_counter,
+        issuer_ordered_pub_account.last_processed_tx_counter,
         tx_id,
         tx_id,
         db_dir.clone(),
@@ -112,10 +114,15 @@ pub fn process_issue_asset(
             &mediator_account.owner_enc_pub_key,
             &[],
             amount,
-            next_pending_tx_counter,
             &mut rng,
         )
         .map_err(|error| Error::LibraryError { error })?;
+
+    let ordering_state = OrderingState {
+        last_processed_tx_counter: issuer_ordered_pub_account.last_processed_tx_counter,
+        last_pending_tx_counter: next_pending_tx_counter,
+        current_tx_id: tx_id,
+    };
 
     if cheat && cheating_strategy == 1 {
         info!("CLI log: tx-{}: Cheating by overwriting the asset id of the account. Correct ticker: {} and asset id: {:?}",
@@ -148,8 +155,9 @@ pub fn process_issue_asset(
     // Save the artifacts to file.
     let state = AssetTxState::Initialization(TxSubstate::Started);
     let save_to_file_timer = Instant::now();
-    let instruction = Instruction {
+    let instruction = OrderedAssetInstruction {
         state,
+        ordering_state,
         data: asset_tx.encode().to_vec(),
     };
 

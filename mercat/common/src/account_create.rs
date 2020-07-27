@@ -1,7 +1,7 @@
 use crate::{
     account_create_transaction_file, calc_account_id, create_rng_from_seed, errors::Error,
-    get_asset_ids, save_object, update_account_map, user_secret_account_file, COMMON_OBJECTS_DIR,
-    OFF_CHAIN_DIR, ON_CHAIN_DIR,
+    get_asset_ids, save_object, update_account_map, user_secret_account_file, OrderedPubAccountTx,
+    OrderingState, COMMON_OBJECTS_DIR, OFF_CHAIN_DIR, ON_CHAIN_DIR,
 };
 use codec::Encode;
 use cryptography::{
@@ -98,12 +98,16 @@ pub fn process_create_account(
         &secret_account,
     )?;
 
+    let instruction = OrderedPubAccountTx {
+        account_tx,
+        ordering_state: OrderingState::new(tx_id),
+    };
     save_object(
         db_dir.clone(),
         ON_CHAIN_DIR,
         COMMON_OBJECTS_DIR,
         &account_create_transaction_file(tx_id, &user, &ticker),
-        &account_tx,
+        &instruction,
     )?;
 
     update_account_map(db_dir, user, ticker, account_id, tx_id)?;

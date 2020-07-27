@@ -12,9 +12,9 @@ use crate::{
     },
     load_object, user_public_account_file, user_secret_account_file,
     validate::validate_all_pending,
-    COMMON_OBJECTS_DIR, OFF_CHAIN_DIR, ON_CHAIN_DIR,
+    OrderedPubAccount, COMMON_OBJECTS_DIR, OFF_CHAIN_DIR, ON_CHAIN_DIR,
 };
-use cryptography::mercat::{Account, PubAccount, SecAccount};
+use cryptography::mercat::{Account, SecAccount};
 use linked_hash_map::LinkedHashMap;
 use log::{error, info, warn};
 use rand::Rng;
@@ -641,12 +641,13 @@ impl TestCase {
                         if !path.exists() {
                             continue;
                         }
-                        let pub_account: PubAccount = load_object(
+                        let ordered_pub_account: OrderedPubAccount = load_object(
                             self.chain_db_dir.clone(),
                             ON_CHAIN_DIR,
                             user,
                             &pub_file_name,
                         )?;
+                        let pub_account = ordered_pub_account.pub_account;
                         let sec_account: SecAccount = load_object(
                             self.chain_db_dir.clone(),
                             OFF_CHAIN_DIR,

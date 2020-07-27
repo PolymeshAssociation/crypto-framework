@@ -1,14 +1,15 @@
 use crate::{
     compute_enc_pending_balance, confidential_transaction_file, construct_path,
     create_rng_from_seed, debug_decrypt, errors::Error, last_ordering_state_before, load_object,
-    save_object, user_public_account_file, user_secret_account_file, CTXInstruction, Instruction,
-    COMMON_OBJECTS_DIR, MEDIATOR_PUBLIC_ACCOUNT_FILE, OFF_CHAIN_DIR, ON_CHAIN_DIR,
+    save_object, user_public_account_file, user_secret_account_file, OrderedPubAccount,
+    OrderedTransferInstruction, OrderingState, COMMON_OBJECTS_DIR, MEDIATOR_PUBLIC_ACCOUNT_FILE,
+    OFF_CHAIN_DIR, ON_CHAIN_DIR,
 };
 use codec::{Decode, Encode};
 use cryptography::mercat::{
     transaction::{CtxReceiver, CtxSender},
-    Account, AccountMemo, InitializedTransferTx, PubAccount, TransferTransactionReceiver,
-    TransferTransactionSender, TxState, TxSubstate,
+    Account, AccountMemo, InitializedTransferTx, TransferTransactionReceiver,
+    TransferTransactionSender, TransferTxState, TxSubstate,
 };
 use lazy_static::lazy_static;
 use log::{debug, info};
@@ -35,6 +36,12 @@ pub fn process_create_tx(
     let mut rng = create_rng_from_seed(Some(seed))?;
     let load_from_file_timer = Instant::now();
 
+    let sender_ordered_pub_account: OrderedPubAccount = load_object(
+        db_dir.clone(),
+        ON_CHAIN_DIR,
+        &sender,
+        &user_public_account_file(&ticker),
+    )?;
     let sender_account = Account {
         scrt: load_object(
             db_dir.clone(),
@@ -42,15 +49,10 @@ pub fn process_create_tx(
             &sender,
             &user_secret_account_file(&ticker),
         )?,
-        pblc: load_object(
-            db_dir.clone(),
-            ON_CHAIN_DIR,
-            &sender,
-            &user_public_account_file(&ticker),
-        )?,
+        pblc: sender_ordered_pub_account.pub_account,
     };
 
-    let receiver_account: PubAccount = load_object(
+    let receiver_account: OrderedPubAccount = load_object(
         db_dir.clone(),
         ON_CHAIN_DIR,
         &receiver,
@@ -73,7 +75,7 @@ pub fn process_create_tx(
 
     // Calculate the pending
     let calc_pending_state_timer = Instant::now();
-    let last_processed_tx_counter = sender_account.pblc.memo.last_processed_tx_counter;
+    let last_processed_tx_counter = sender_ordered_pub_account.last_processed_tx_counter;
     let last_processed_account_balance = sender_account.pblc.enc_balance;
     let ordering_state = last_ordering_state_before(
         sender.clone(),
@@ -85,7 +87,7 @@ pub fn process_create_tx(
 
     let pending_balance = compute_enc_pending_balance(
         &sender,
-        ordering_state,
+        ordering_state.clone(),
         last_processed_tx_counter,
         last_processed_account_balance,
         db_dir.clone(),
@@ -130,15 +132,20 @@ pub fn process_create_tx(
         .create_transaction(
             tx_id,
             &sender_account,
-            &receiver_account,
+            &receiver_account.pub_account,
             &mediator_account.owner_enc_pub_key,
             pending_balance,
             &[],
             amount,
-            next_pending_tx_counter,
             &mut rng,
         )
         .map_err(|error| Error::LibraryError { error })?;
+
+    let ordering_state = OrderingState {
+        last_processed_tx_counter: sender_ordered_pub_account.last_processed_tx_counter,
+        last_pending_tx_counter: next_pending_tx_counter,
+        current_tx_id: tx_id,
+    };
     timing!("account.create_tx.create", create_tx_timer, Instant::now());
 
     if cheat && cheating_strategy == 1 {
@@ -152,10 +159,11 @@ pub fn process_create_tx(
     }
 
     // Save the artifacts to file.
-    let new_state = TxState::Initialization(TxSubstate::Started);
+    let new_state = TransferTxState::Initialization(TxSubstate::Started);
     let save_to_file_timer = Instant::now();
-    let instruction = CTXInstruction {
+    let instruction = OrderedTransferInstruction {
         state: new_state,
+        ordering_state,
         data: asset_tx.encode().to_vec(),
     };
 
@@ -188,15 +196,21 @@ pub fn process_finalize_tx(
 ) -> Result<(), Error> {
     let mut rng = create_rng_from_seed(Some(seed))?;
     let load_from_file_timer = Instant::now();
-    let state = TxState::Initialization(TxSubstate::Started);
+    let state = TransferTxState::Initialization(TxSubstate::Started);
 
-    let sender_account: PubAccount = load_object(
+    let sender_ordered_pub_account: OrderedPubAccount = load_object(
         db_dir.clone(),
         ON_CHAIN_DIR,
         &sender,
         &user_public_account_file(&ticker),
     )?;
 
+    let receiver_ordered_pub_account: OrderedPubAccount = load_object(
+        db_dir.clone(),
+        ON_CHAIN_DIR,
+        &receiver,
+        &user_public_account_file(&ticker),
+    )?;
     let receiver_account = Account {
         scrt: load_object(
             db_dir.clone(),
@@ -204,15 +218,10 @@ pub fn process_finalize_tx(
             &receiver,
             &user_secret_account_file(&ticker),
         )?,
-        pblc: load_object(
-            db_dir.clone(),
-            ON_CHAIN_DIR,
-            &receiver,
-            &user_public_account_file(&ticker),
-        )?,
+        pblc: receiver_ordered_pub_account.pub_account,
     };
 
-    let instruction: Instruction = load_object(
+    let instruction: OrderedTransferInstruction = load_object(
         db_dir.clone(),
         ON_CHAIN_DIR,
         COMMON_OBJECTS_DIR,
@@ -242,7 +251,7 @@ pub fn process_finalize_tx(
     let calc_pending_state_timer = Instant::now();
     let ordering_state = last_ordering_state_before(
         receiver,
-        receiver_account.pblc.memo.last_processed_tx_counter,
+        receiver_ordered_pub_account.last_processed_tx_counter,
         tx_id,
         tx_id,
         db_dir.clone(),
@@ -278,13 +287,21 @@ pub fn process_finalize_tx(
         .finalize_transaction(
             tx_id,
             tx,
-            &sender_account.memo.owner_sign_pub_key,
+            &sender_ordered_pub_account
+                .pub_account
+                .memo
+                .owner_sign_pub_key,
             receiver_account.clone(),
             amount,
-            next_pending_tx_counter,
             &mut rng,
         )
         .map_err(|error| Error::LibraryError { error })?;
+
+    let ordering_state = OrderingState {
+        last_processed_tx_counter: receiver_ordered_pub_account.last_processed_tx_counter,
+        last_pending_tx_counter: next_pending_tx_counter,
+        current_tx_id: tx_id,
+    };
 
     if cheat && cheating_strategy == 1 {
         info!(
@@ -308,9 +325,10 @@ pub fn process_finalize_tx(
 
     // Save the artifacts to file.
     let save_to_file_timer = Instant::now();
-    let state = TxState::Finalization(TxSubstate::Started);
-    let instruction = CTXInstruction {
+    let state = TransferTxState::Finalization(TxSubstate::Started);
+    let instruction = OrderedTransferInstruction {
         state,
+        ordering_state,
         data: asset_tx.encode().to_vec(),
     };
 

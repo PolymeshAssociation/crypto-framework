@@ -1,7 +1,8 @@
 use crate::{
     asset_transaction_file, compute_enc_pending_balance, confidential_transaction_file,
     construct_path, create_rng_from_seed, errors::Error, last_ordering_state_before, load_object,
-    save_object, user_public_account_file, CTXInstruction, Instruction, COMMON_OBJECTS_DIR,
+    save_object, user_public_account_file, AssetInstruction, OrderedAssetInstruction,
+    OrderedPubAccount, OrderedTransferInstruction, TransferInstruction, COMMON_OBJECTS_DIR,
     MEDIATOR_PUBLIC_ACCOUNT_FILE, OFF_CHAIN_DIR, ON_CHAIN_DIR, SECRET_ACCOUNT_FILE,
 };
 use codec::{Decode, Encode};
@@ -11,7 +12,7 @@ use cryptography::{
     mercat::{
         asset::AssetMediator, transaction::CtxMediator, AccountMemo, AssetTransactionMediator,
         AssetTxState, EncryptionKeys, FinalizedTransferTx, InitializedAssetTx, MediatorAccount,
-        PubAccount, TransferTransactionMediator, TxState, TxSubstate,
+        TransferTransactionMediator, TransferTxState, TxSubstate,
     },
 };
 use curve25519_dalek::scalar::Scalar;
@@ -38,8 +39,7 @@ fn generate_mediator_keys<R: RngCore + CryptoRng>(rng: &mut R) -> (AccountMemo, 
         MiniSecretKey::generate_with(rng).expand_to_keypair(ExpansionMode::Ed25519);
 
     (
-        // By default, the last processed tx counter is set to zero for account creation.
-        AccountMemo::new(mediator_enc_key.pblc, mediator_signing_pair.public, 0),
+        AccountMemo::new(mediator_enc_key.pblc, mediator_signing_pair.public),
         MediatorAccount {
             encryption_key: mediator_enc_key,
             signing_key: mediator_signing_pair,
@@ -105,7 +105,7 @@ pub fn justify_asset_issuance_transaction(
         AssetTxState::Initialization(TxSubstate::Started),
     );
 
-    let instruction: Instruction = load_object(
+    let instruction: OrderedAssetInstruction = load_object(
         db_dir.clone(),
         ON_CHAIN_DIR,
         COMMON_OBJECTS_DIR,
@@ -131,7 +131,7 @@ pub fn justify_asset_issuance_transaction(
         SECRET_ACCOUNT_FILE,
     )?;
 
-    let issuer_account: PubAccount = load_object(
+    let issuer_ordered_pub_account: OrderedPubAccount = load_object(
         db_dir.clone(),
         ON_CHAIN_DIR,
         &issuer,
@@ -150,7 +150,7 @@ pub fn justify_asset_issuance_transaction(
     let mut justified_tx = AssetMediator {}
         .justify_asset_transaction(
             asset_tx.clone(),
-            &issuer_account,
+            &issuer_ordered_pub_account.pub_account,
             &mediator_account.encryption_key,
             &mediator_account.signing_key,
             &[],
@@ -196,7 +196,7 @@ pub fn justify_asset_issuance_transaction(
             tx_id
         );
         let rejected_state = AssetTxState::Justification(TxSubstate::Rejected);
-        next_instruction = Instruction {
+        next_instruction = AssetInstruction {
             data: asset_tx.encode().to_vec(),
             state: rejected_state,
         };
@@ -209,8 +209,8 @@ pub fn justify_asset_issuance_transaction(
             &next_instruction,
         )?;
     } else {
-        // Save the updated_issuer_account, and the justified transaction.
-        next_instruction = Instruction {
+        // Save the justified transaction.
+        next_instruction = AssetInstruction {
             data: justified_tx.encode().to_vec(),
             state: AssetTxState::Justification(TxSubstate::Started),
         };
@@ -253,9 +253,12 @@ pub fn justify_asset_transfer_transaction(
     let justify_load_objects_timer = Instant::now();
     let mut rng = create_rng_from_seed(Some(seed))?;
 
-    let instruction_path =
-        confidential_transaction_file(tx_id, &sender, TxState::Finalization(TxSubstate::Started));
-    let instruction: CTXInstruction = load_object(
+    let instruction_path = confidential_transaction_file(
+        tx_id,
+        &sender,
+        TransferTxState::Finalization(TxSubstate::Started),
+    );
+    let instruction: OrderedTransferInstruction = load_object(
         db_dir.clone(),
         ON_CHAIN_DIR,
         COMMON_OBJECTS_DIR,
@@ -281,14 +284,14 @@ pub fn justify_asset_transfer_transaction(
         SECRET_ACCOUNT_FILE,
     )?;
 
-    let sender_account: PubAccount = load_object(
+    let sender_ordered_pub_account: OrderedPubAccount = load_object(
         db_dir.clone(),
         ON_CHAIN_DIR,
         &sender.clone(),
         &user_public_account_file(&ticker),
     )?;
 
-    let receiver_account: PubAccount = load_object(
+    let receiver_ordered_pub_account: OrderedPubAccount = load_object(
         db_dir.clone(),
         ON_CHAIN_DIR,
         &receiver.clone(),
@@ -306,8 +309,8 @@ pub fn justify_asset_transfer_transaction(
     let justify_library_timer = Instant::now();
 
     // Calculate the pending
-    let last_processed_tx_counter = sender_account.memo.last_processed_tx_counter;
-    let last_processed_account_balance = sender_account.enc_balance;
+    let last_processed_tx_counter = sender_ordered_pub_account.last_processed_tx_counter;
+    let last_processed_account_balance = sender_ordered_pub_account.pub_account.enc_balance;
     let ordering_state = last_ordering_state_before(
         sender.clone(),
         last_processed_tx_counter,
@@ -330,8 +333,8 @@ pub fn justify_asset_transfer_transaction(
             asset_tx.clone(),
             &mediator_account.encryption_key,
             &mediator_account.signing_key,
-            &sender_account,
-            &receiver_account,
+            &sender_ordered_pub_account.pub_account,
+            &receiver_ordered_pub_account.pub_account,
             pending_balance,
             &[],
             asset_id,
@@ -370,8 +373,8 @@ pub fn justify_asset_transfer_transaction(
     let justify_save_objects_timer = Instant::now();
     // If the `reject` flag is set, save the transaction as rejected.
     if reject {
-        let rejected_state = TxState::Justification(TxSubstate::Rejected);
-        next_instruction = CTXInstruction {
+        let rejected_state = TransferTxState::Justification(TxSubstate::Rejected);
+        next_instruction = TransferInstruction {
             data: asset_tx.encode().to_vec(),
             state: rejected_state,
         };
@@ -384,9 +387,9 @@ pub fn justify_asset_transfer_transaction(
             &next_instruction,
         )?;
     } else {
-        let new_state = TxState::Justification(TxSubstate::Started);
+        let new_state = TransferTxState::Justification(TxSubstate::Started);
         // Save the updated_issuer_account, and the justified transaction.
-        next_instruction = CTXInstruction {
+        next_instruction = TransferInstruction {
             data: justified_tx.encode().to_vec(),
             state: new_state,
         };

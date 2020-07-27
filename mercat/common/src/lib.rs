@@ -12,8 +12,8 @@ pub mod validate;
 use codec::{Decode, Encode};
 use cryptography::mercat::{
     Account, AssetTxState, EncryptedAmount, FinalizedTransferTx, InitializedAssetTx,
-    InitializedTransferTx, JustifiedAssetTx, JustifiedTransferTx, OrderingState, PubAccountTx,
-    TxState, TxSubstate,
+    InitializedTransferTx, JustifiedAssetTx, JustifiedTransferTx, PubAccount, PubAccountTx,
+    TransferTxState, TxSubstate,
 };
 use curve25519_dalek::scalar::Scalar;
 use errors::Error;
@@ -49,11 +49,13 @@ pub const LAST_VALIDATED_TX_ID_FILE: &str = "last_validated_tx_id_file.json";
 pub enum CoreTransaction {
     Account {
         account_tx: PubAccountTx,
+        ordering_state: OrderingState,
         tx_id: u32,
     },
     IssueInit {
         issue_tx: InitializedAssetTx,
         issuer: String,
+        ordering_state: OrderingState,
         tx_id: u32,
     },
     IssueJustify {
@@ -64,11 +66,13 @@ pub enum CoreTransaction {
     TransferInit {
         tx: InitializedTransferTx,
         sender: String,
+        ordering_state: OrderingState,
         tx_id: u32,
     },
     TransferFinalize {
         tx: FinalizedTransferTx,
         receiver: String,
+        ordering_state: OrderingState,
         tx_id: u32,
     },
     TransferJustify {
@@ -84,6 +88,7 @@ impl CoreTransaction {
         match self {
             CoreTransaction::Account {
                 account_tx: _,
+                ordering_state: _,
                 tx_id: _,
             } => true,
             CoreTransaction::IssueJustify {
@@ -105,6 +110,7 @@ impl CoreTransaction {
             CoreTransaction::TransferInit {
                 tx: _,
                 sender: _,
+                ordering_state: _,
                 tx_id: _,
             } => true,
             _ => false,
@@ -114,25 +120,29 @@ impl CoreTransaction {
     pub fn ordering_state(&self) -> OrderingState {
         match self {
             CoreTransaction::Account {
-                account_tx,
+                account_tx: _,
                 tx_id: _,
-            } => account_tx.content.ordering_state,
+                ordering_state,
+            } => ordering_state.clone(),
             CoreTransaction::IssueInit {
-                issue_tx,
+                issue_tx: _,
                 issuer: _,
+                ordering_state,
                 tx_id: _,
-            } => issue_tx.content.memo.ordering_state,
+            } => ordering_state.clone(),
             CoreTransaction::TransferInit {
-                tx,
+                tx: _,
                 sender: _,
+                ordering_state,
                 tx_id: _,
-            } => tx.content.memo.sndr_ordering_state,
+            } => ordering_state.clone(),
             CoreTransaction::TransferFinalize {
-                tx,
+                tx: _,
                 receiver: _,
+                ordering_state,
                 tx_id: _,
-            } => tx.content.rcvr_ordering_state,
-            _ => OrderingState::default(),
+            } => ordering_state.clone(),
+            _ => OrderingState::new(0),
         }
     }
 }
@@ -163,8 +173,66 @@ impl ValidationResult {
 }
 
 #[derive(Debug, Serialize, Deserialize, Encode, Decode, Clone)]
-pub struct Instruction {
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "std", derive(Debug))]
+pub struct OrderingState {
+    pub last_processed_tx_counter: Option<u32>,
+    pub last_pending_tx_counter: u32,
+    pub current_tx_id: u32,
+}
+
+impl OrderingState {
+    fn new(tx_id: u32) -> Self {
+        Self {
+            last_processed_tx_counter: None,
+            last_pending_tx_counter: 0,
+            current_tx_id: tx_id,
+        }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, Encode, Decode, Clone)]
+pub struct OrderedPubAccount {
+    pub last_processed_tx_counter: Option<u32>,
+    pub pub_account: PubAccount,
+}
+
+#[derive(Debug, Serialize, Deserialize, Encode, Decode, Clone)]
+pub struct OrderedPubAccountTx {
+    pub ordering_state: OrderingState,
+    pub account_tx: PubAccountTx,
+}
+
+/// Used for issue asset transaction.
+#[derive(Debug, Serialize, Deserialize, Encode, Decode, Clone)]
+pub struct OrderedAssetInstruction {
     pub state: AssetTxState,
+    pub ordering_state: OrderingState,
+    #[serde(with = "serde_bytes")]
+    pub data: Vec<u8>,
+}
+
+/// Used for justification and verification of issue asset transaction.
+#[derive(Debug, Serialize, Deserialize, Encode, Decode, Clone)]
+pub struct AssetInstruction {
+    pub state: AssetTxState,
+    #[serde(with = "serde_bytes")]
+    pub data: Vec<u8>,
+}
+
+/// Used for creating and finalizing a transfer transaction.
+#[derive(Debug, Serialize, Deserialize, Encode, Decode, Clone)]
+pub struct OrderedTransferInstruction {
+    pub state: TransferTxState,
+    pub ordering_state: OrderingState,
+    #[serde(with = "serde_bytes")]
+    pub data: Vec<u8>,
+}
+
+/// Used for justifying and validating a transfer transaction.
+#[derive(Debug, Serialize, Deserialize, Encode, Decode, Clone)]
+pub struct TransferInstruction {
+    pub state: TransferTxState,
     #[serde(with = "serde_bytes")]
     pub data: Vec<u8>,
 }
@@ -175,7 +243,7 @@ pub fn asset_transaction_file(tx_id: u32, user: &String, state: AssetTxState) ->
 }
 
 #[inline]
-pub fn confidential_transaction_file(tx_id: u32, user: &String, state: TxState) -> String {
+pub fn confidential_transaction_file(tx_id: u32, user: &String, state: TransferTxState) -> String {
     format!("tx_{}_{}_{}.json", tx_id, user, state)
 }
 
@@ -218,13 +286,6 @@ pub fn parse_tx_name(tx_file_path: String) -> Result<(u32, String, String, Strin
     let user = caps[2].to_string();
     let state = caps[3].to_string();
     Ok((tx_id, user, state, tx_file_path))
-}
-
-#[derive(Debug, Serialize, Deserialize, Encode, Decode, Clone)]
-pub struct CTXInstruction {
-    pub state: TxState,
-    #[serde(with = "serde_bytes")]
-    pub data: Vec<u8>,
 }
 
 #[allow(dead_code)]
@@ -537,16 +598,14 @@ pub fn get_user_ticker_from(
 #[inline]
 pub fn last_ordering_state_before(
     user: String,
-    last_processed_tx_counter_from_account: i32,
+    last_processed_tx_counter_from_account: Option<u32>,
     current_tx_id: u32,
-    max_tx_id: u32,
+    max_tx_id: u32, // TODO seems like it is always the same as current_tx_id
     db_dir: PathBuf,
 ) -> Result<OrderingState, Error> {
     let all_tx_files = all_unverified_tx_files(db_dir)?;
-    const ERROR_CASE: i32 = -2;
-    const INITIAL_CASE: i32 = -3;
 
-    let parsed: (i32, i32, CoreTransaction) = all_tx_files
+    let parsed: (Option<Error>, Option<u32>, Option<u32>, CoreTransaction) = all_tx_files
         .into_iter()
         .map(|tx| parse_tx_name(tx)) // extract info from file name
         .filter(|res| {
@@ -564,49 +623,55 @@ pub fn last_ordering_state_before(
             })
         })
         .fold(
-            (INITIAL_CASE, INITIAL_CASE, CoreTransaction::Invalid),
+            (None, None, None, CoreTransaction::Invalid),
             // closure of the fold operator.
             |acc, tx| {
                 // find the last transaction by comparing the last pending transaction value of each tx.
-                let (max_pending, last_processed, last_tx) = acc;
+                let (prev_error, last_processed, max_pending, last_tx) = acc;
                 match tx {
                     Err(error) => {
                         error!("Error while finding the last transaction: {:?}", error);
-                        (ERROR_CASE, ERROR_CASE, CoreTransaction::Invalid)
+                        (Some(error), None, None, CoreTransaction::Invalid)
                     }
                     Ok(tx) => {
                         let ordering_state = tx.ordering_state();
-                        if max_pending == ERROR_CASE {
-                            (ERROR_CASE, ERROR_CASE, CoreTransaction::Invalid)
-                        } else if ordering_state.last_pending_tx_counter as i32 > max_pending {
-                            (
-                                ordering_state.last_pending_tx_counter as i32,
-                                ordering_state.last_processed_tx_counter,
-                                tx,
-                            )
-                        } else {
-                            (max_pending, last_processed, last_tx)
+                        match prev_error {
+                            Some(error) => (Some(error), None, None, CoreTransaction::Invalid),
+                            None => {
+                                if ordering_state.last_pending_tx_counter
+                                    > max_pending.unwrap_or_default()
+                                {
+                                    (
+                                        None,
+                                        ordering_state.last_processed_tx_counter,
+                                        Some(ordering_state.last_pending_tx_counter),
+                                        tx,
+                                    )
+                                } else {
+                                    (prev_error, last_processed, max_pending, last_tx)
+                                }
+                            }
                         }
                     }
                 }
             },
         );
-    let (last_pending_tx_counter, last_processed_tx_counter, _) = parsed;
-    if last_pending_tx_counter == ERROR_CASE {
+    let (prev_error, last_processed_tx_counter, last_pending_tx_counter, _) = parsed;
+    if let Some(_) = prev_error {
         return Err(Error::LastTransactionNotFound { user });
     }
-    if last_pending_tx_counter == INITIAL_CASE {
+    if last_pending_tx_counter == None {
         // No pending transactions found, return the ordering state from the account.
         return Ok(OrderingState {
             last_processed_tx_counter: last_processed_tx_counter_from_account,
-            last_pending_tx_counter: last_processed_tx_counter_from_account,
+            last_pending_tx_counter: last_processed_tx_counter_from_account.unwrap_or_default(),
             current_tx_id,
         });
         //return Err(Error::LastTransactionNotFound { user });
     }
     Ok(OrderingState {
-        last_pending_tx_counter,
         last_processed_tx_counter,
+        last_pending_tx_counter: last_pending_tx_counter.unwrap_or_default(),
         current_tx_id,
     })
 }
@@ -615,8 +680,8 @@ pub fn last_ordering_state_before(
 pub fn load_tx_between_counters_for_user(
     user: &String,
     db_dir: PathBuf,
-    start: i32,
-    end: i32,
+    start: u32,
+    end: u32,
 ) -> Result<Vec<CoreTransaction>, Error> {
     all_unverified_tx_files(db_dir)?
         .into_iter()
@@ -650,7 +715,7 @@ pub fn load_tx_between_counters_for_user(
 pub fn compute_enc_pending_balance(
     sender: &String,
     ordering_state: OrderingState, // The state at the time of creating the last transaction
-    last_processed_tx_counter: i32, // The current last processed tx counter
+    last_processed_tx_counter: Option<u32>, // The current last processed tx counter
     enc_balance_in_account: EncryptedAmount,
     db_dir: PathBuf,
 ) -> Result<EncryptedAmount, Error> {
@@ -660,7 +725,10 @@ pub fn compute_enc_pending_balance(
             earliest: ordering_state.last_processed_tx_counter,
         });
     }
-    let start = ordering_state.last_processed_tx_counter + 1;
+    let mut start = 1;
+    if let Some(counter) = ordering_state.last_processed_tx_counter {
+        start = counter + 1;
+    }
     let transfer_inits = load_tx_between_counters_for_user(
         sender,
         db_dir.clone(),
@@ -698,6 +766,7 @@ pub fn compute_enc_pending_balance(
         if let CoreTransaction::TransferInit {
             tx,
             sender: _,
+            ordering_state: _,
             tx_id: _,
         } = core_tx
         {
@@ -783,39 +852,44 @@ pub fn load_tx_file(
     tx_file_path: String,
 ) -> Result<CoreTransaction, Error> {
     let tx = if state == AssetTxState::Initialization(TxSubstate::Started).to_string() {
-        let instruction: Instruction = load_object_from(PathBuf::from(tx_file_path))?;
+        let instruction: OrderedAssetInstruction = load_object_from(PathBuf::from(tx_file_path))?;
         CoreTransaction::IssueInit {
             issue_tx: InitializedAssetTx::decode(&mut &instruction.data[..])
                 .map_err(|_| Error::DecodeError)?,
             issuer: user,
+            ordering_state: instruction.ordering_state,
             tx_id,
         }
     } else if state == AssetTxState::Justification(TxSubstate::Started).to_string() {
-        let instruction: Instruction = load_object_from(PathBuf::from(tx_file_path))?;
+        let instruction: AssetInstruction = load_object_from(PathBuf::from(tx_file_path))?;
         CoreTransaction::IssueJustify {
             issue_tx: JustifiedAssetTx::decode(&mut &instruction.data[..])
                 .map_err(|_| Error::DecodeError)?,
             mediator: user,
             tx_id,
         }
-    } else if state == TxState::Initialization(TxSubstate::Started).to_string() {
-        let instruction: CTXInstruction = load_object_from(PathBuf::from(tx_file_path))?;
+    } else if state == TransferTxState::Initialization(TxSubstate::Started).to_string() {
+        let instruction: OrderedTransferInstruction =
+            load_object_from(PathBuf::from(tx_file_path))?;
         CoreTransaction::TransferInit {
             tx: InitializedTransferTx::decode(&mut &instruction.data[..])
                 .map_err(|_| Error::DecodeError)?,
             sender: user,
+            ordering_state: instruction.ordering_state,
             tx_id,
         }
-    } else if state == TxState::Finalization(TxSubstate::Started).to_string() {
-        let instruction: CTXInstruction = load_object_from(PathBuf::from(tx_file_path))?;
+    } else if state == TransferTxState::Finalization(TxSubstate::Started).to_string() {
+        let instruction: OrderedTransferInstruction =
+            load_object_from(PathBuf::from(tx_file_path))?;
         CoreTransaction::TransferFinalize {
             tx: FinalizedTransferTx::decode(&mut &instruction.data[..])
                 .map_err(|_| Error::DecodeError)?,
             receiver: user,
+            ordering_state: instruction.ordering_state,
             tx_id,
         }
-    } else if state == TxState::Justification(TxSubstate::Started).to_string() {
-        let instruction: CTXInstruction = load_object_from(PathBuf::from(tx_file_path))?;
+    } else if state == TransferTxState::Justification(TxSubstate::Started).to_string() {
+        let instruction: TransferInstruction = load_object_from(PathBuf::from(tx_file_path))?;
         CoreTransaction::TransferJustify {
             tx: JustifiedTransferTx::decode(&mut &instruction.data[..])
                 .map_err(|_| Error::DecodeError)?,
@@ -823,8 +897,13 @@ pub fn load_tx_file(
             tx_id,
         }
     } else if state.starts_with("ticker#") {
-        let account_tx: PubAccountTx = load_object_from(PathBuf::from(tx_file_path))?;
-        CoreTransaction::Account { account_tx, tx_id }
+        let ordered_account_tx: OrderedPubAccountTx =
+            load_object_from(PathBuf::from(tx_file_path))?;
+        CoreTransaction::Account {
+            account_tx: ordered_account_tx.account_tx,
+            tx_id,
+            ordering_state: ordered_account_tx.ordering_state,
+        }
     } else {
         return Err(Error::InvalidTransactionFile { path: tx_file_path });
     };
@@ -839,6 +918,12 @@ fn debug_decrypt(
     db_dir: PathBuf,
 ) -> Result<u32, Error> {
     let (user, ticker, _) = get_user_ticker_from(account_id, db_dir.clone())?;
+    let ordered_pub_account: OrderedPubAccount = load_object(
+        db_dir.clone(),
+        ON_CHAIN_DIR,
+        &user,
+        &user_public_account_file(&ticker),
+    )?;
     let account = Account {
         scrt: load_object(
             db_dir.clone(),
@@ -846,12 +931,7 @@ fn debug_decrypt(
             &user,
             &user_secret_account_file(&ticker),
         )?,
-        pblc: load_object(
-            db_dir.clone(),
-            ON_CHAIN_DIR,
-            &user,
-            &user_public_account_file(&ticker),
-        )?,
+        pblc: ordered_pub_account.pub_account,
     };
     account
         .scrt

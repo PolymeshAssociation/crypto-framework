@@ -2,16 +2,17 @@ use crate::{
     account_create_transaction_file, all_unverified_tx_files, asset_transaction_file,
     compute_enc_pending_balance, confidential_transaction_file, debug_decrypt, errors::Error,
     get_asset_ids, get_user_ticker_from, last_ordering_state_before, load_object, load_tx_file,
-    parse_tx_name, save_object, save_to_file, user_public_account_file, CTXInstruction,
-    CoreTransaction, Direction, Instruction, ValidationResult, COMMON_OBJECTS_DIR,
-    LAST_VALIDATED_TX_ID_FILE, MEDIATOR_PUBLIC_ACCOUNT_FILE, OFF_CHAIN_DIR, ON_CHAIN_DIR,
+    parse_tx_name, save_object, save_to_file, user_public_account_file, AssetInstruction,
+    CoreTransaction, Direction, OrderedPubAccount, OrderedPubAccountTx, TransferInstruction,
+    ValidationResult, COMMON_OBJECTS_DIR, LAST_VALIDATED_TX_ID_FILE, MEDIATOR_PUBLIC_ACCOUNT_FILE,
+    OFF_CHAIN_DIR, ON_CHAIN_DIR,
 };
 use codec::{Decode, Encode};
 use cryptography::mercat::{
     account::AccountValidator, asset::AssetValidator, transaction::TransactionValidator,
     AccountCreatorVerifier, AccountMemo, AssetTransactionVerifier, AssetTxState, EncryptedAmount,
-    JustifiedAssetTx, JustifiedTransferTx, PubAccount, PubAccountTx, TransferTransactionVerifier,
-    TxState, TxSubstate,
+    JustifiedAssetTx, JustifiedTransferTx, PubAccount, TransferTransactionVerifier,
+    TransferTxState, TxSubstate,
 };
 use log::{debug, error, info};
 use metrics::timing;
@@ -35,7 +36,7 @@ fn load_all_unverified_and_ready(db_dir: PathBuf) -> Result<Vec<CoreTransaction>
 pub fn validate_all_pending(db_dir: PathBuf) -> Result<(), Error> {
     // TODO: This function should be called when any justify is called. To be fixed in CRYP-131.
     let all_unverified_and_ready = load_all_unverified_and_ready(db_dir.clone())?;
-    let mut last_tx_id: i32 = -1;
+    let mut last_tx_id: Option<u32> = None;
 
     let mut results: Vec<ValidationResult> = vec![];
     // For each of them call the validate function and process as needed
@@ -49,7 +50,7 @@ pub fn validate_all_pending(db_dir: PathBuf) -> Result<(), Error> {
                 let result =
                     validate_asset_issuance(db_dir.clone(), issue_tx.clone(), mediator, tx_id);
                 results.push(result);
-                last_tx_id = std::cmp::max(last_tx_id, tx_id as i32);
+                last_tx_id = Some(std::cmp::max(last_tx_id.unwrap_or_default(), tx_id));
             }
             CoreTransaction::TransferJustify {
                 tx,
@@ -58,7 +59,7 @@ pub fn validate_all_pending(db_dir: PathBuf) -> Result<(), Error> {
             } => {
                 let account_id = tx.content.content.init_data.content.memo.sndr_account_id;
                 let (sender, ticker, _) = get_user_ticker_from(account_id, db_dir.clone())?;
-                let sender_account: PubAccount = load_object(
+                let sender_ordered_pub_account: OrderedPubAccount = load_object(
                     db_dir.clone(),
                     ON_CHAIN_DIR,
                     &sender,
@@ -66,22 +67,16 @@ pub fn validate_all_pending(db_dir: PathBuf) -> Result<(), Error> {
                 )?;
                 let ordering_state = last_ordering_state_before(
                     sender.clone(),
-                    sender_account.memo.last_processed_tx_counter,
+                    sender_ordered_pub_account.last_processed_tx_counter,
                     tx_id,
-                    tx.content
-                        .content
-                        .init_data
-                        .content
-                        .memo
-                        .sndr_ordering_state
-                        .current_tx_id,
+                    tx_id, //TODO
                     db_dir.clone(),
                 )?;
                 let pending_balance = compute_enc_pending_balance(
                     &sender,
                     ordering_state,
-                    sender_account.memo.last_processed_tx_counter,
-                    sender_account.enc_balance,
+                    sender_ordered_pub_account.last_processed_tx_counter,
+                    sender_ordered_pub_account.pub_account.enc_balance,
                     db_dir.clone(),
                 )?;
                 debug!(
@@ -93,9 +88,13 @@ pub fn validate_all_pending(db_dir: PathBuf) -> Result<(), Error> {
                     validate_transaction(db_dir.clone(), tx, mediator, pending_balance, tx_id);
                 results.push(sender_result);
                 results.push(receiver_result);
-                last_tx_id = std::cmp::max(last_tx_id, tx_id as i32);
+                last_tx_id = Some(std::cmp::max(last_tx_id.unwrap_or_default(), tx_id));
             }
-            CoreTransaction::Account { account_tx, tx_id } => {
+            CoreTransaction::Account {
+                account_tx,
+                tx_id,
+                ordering_state: _,
+            } => {
                 match validate_account(db_dir.clone(), account_tx.content.pub_account.id) {
                     Err(error) => {
                         error!("Error in validation of tx-{}: {:#?}", tx_id, error);
@@ -103,7 +102,7 @@ pub fn validate_all_pending(db_dir: PathBuf) -> Result<(), Error> {
                     }
                     Ok(_) => (),
                 };
-                last_tx_id = std::cmp::max(last_tx_id, tx_id as i32);
+                last_tx_id = Some(std::cmp::max(last_tx_id.unwrap_or_default(), tx_id));
             }
             _ => {
                 return Err(Error::TransactionIsNotReadyForValidation { tx });
@@ -132,18 +131,22 @@ pub fn validate_all_pending(db_dir: PathBuf) -> Result<(), Error> {
     }
 
     for (user, ticker) in accounts.clone() {
-        let pub_account: PubAccount = load_object(
+        let ordered_pub_account: OrderedPubAccount = load_object(
             db_dir.clone(),
             ON_CHAIN_DIR,
             &user,
             &user_public_account_file(&ticker),
         )?;
-        let mut new_balance = pub_account.enc_balance;
+        let mut new_balance = ordered_pub_account.pub_account.enc_balance;
         debug!(
             "------------> Validation complete, updating {}-{}. Starting balance: {}",
             &user,
             &ticker,
-            debug_decrypt(pub_account.id, new_balance.clone(), db_dir.clone())?
+            debug_decrypt(
+                ordered_pub_account.pub_account.id,
+                new_balance.clone(),
+                db_dir.clone()
+            )?
         );
         for result in results.clone() {
             if result.user == user && result.ticker == ticker {
@@ -154,7 +157,11 @@ pub fn validate_all_pending(db_dir: PathBuf) -> Result<(), Error> {
                                 "---------------------> updating {}-{} increasing by {}",
                                 &user,
                                 &ticker,
-                                debug_decrypt(pub_account.id, amount.clone(), db_dir.clone())?
+                                debug_decrypt(
+                                    ordered_pub_account.pub_account.id,
+                                    amount.clone(),
+                                    db_dir.clone()
+                                )?
                             );
                             new_balance += amount.clone();
                         } else {
@@ -168,7 +175,11 @@ pub fn validate_all_pending(db_dir: PathBuf) -> Result<(), Error> {
                                 "---------------------> updating {}-{} decreasing by {}",
                                 &user,
                                 &ticker,
-                                debug_decrypt(pub_account.id, amount.clone(), db_dir.clone())?
+                                debug_decrypt(
+                                    ordered_pub_account.pub_account.id,
+                                    amount.clone(),
+                                    db_dir.clone()
+                                )?
                             );
                             new_balance -= amount.clone();
                         } else {
@@ -184,11 +195,14 @@ pub fn validate_all_pending(db_dir: PathBuf) -> Result<(), Error> {
             ON_CHAIN_DIR,
             &user,
             &user_public_account_file(&ticker),
-            &PubAccount {
-                id: pub_account.id,
-                enc_asset_id: pub_account.enc_asset_id,
-                enc_balance: new_balance,
-                memo: pub_account.memo,
+            &OrderedPubAccount {
+                last_processed_tx_counter: last_tx_id,
+                pub_account: PubAccount {
+                    id: ordered_pub_account.pub_account.id,
+                    enc_asset_id: ordered_pub_account.pub_account.enc_asset_id,
+                    enc_balance: new_balance,
+                    memo: ordered_pub_account.pub_account.memo,
+                },
             },
         )?;
     }
@@ -234,17 +248,17 @@ pub fn validate_asset_issuance(
     }
     let mediator_account = mediator_account.unwrap();
 
-    let issuer_account: Result<PubAccount, Error> = load_object(
+    let issuer_ordered_pub_account: Result<OrderedPubAccount, Error> = load_object(
         db_dir.clone(),
         ON_CHAIN_DIR,
         &issuer,
         &user_public_account_file(&ticker),
     );
-    if let Err(error) = issuer_account {
+    if let Err(error) = issuer_ordered_pub_account {
         error!("Error in validation of tx-{}: {:#?}", tx_id, error);
         return ValidationResult::error(&issuer, &ticker);
     }
-    let issuer_account = issuer_account.unwrap();
+    let issuer_ordered_pub_account = issuer_ordered_pub_account.unwrap();
 
     timing!(
         "validator.issuance.load_objects",
@@ -259,7 +273,7 @@ pub fn validate_asset_issuance(
     let _ = match validator
         .verify_asset_transaction(
             &asset_tx,
-            issuer_account,
+            issuer_ordered_pub_account.pub_account,
             &mediator_account.owner_enc_pub_key,
             &mediator_account.owner_sign_pub_key,
             &[],
@@ -283,7 +297,7 @@ pub fn validate_asset_issuance(
     let save_objects_timer = Instant::now();
     // Save the transaction under the new state.
     let new_state = AssetTxState::Justification(TxSubstate::Validated);
-    let instruction = Instruction {
+    let instruction = AssetInstruction {
         state: new_state,
         data: asset_tx.encode().to_vec(),
     };
@@ -322,7 +336,7 @@ pub fn validate_account(db_dir: PathBuf, account_id: u32) -> Result<(), Error> {
         "Validating account{{tx_id: {}, account_id: {}, user: {}, ticker: {}}}",
         tx_id, account_id, user, ticker
     );
-    let user_account: PubAccountTx = load_object(
+    let ordered_user_account_tx: OrderedPubAccountTx = load_object(
         db_dir.clone(),
         ON_CHAIN_DIR,
         COMMON_OBJECTS_DIR,
@@ -341,7 +355,7 @@ pub fn validate_account(db_dir: PathBuf, account_id: u32) -> Result<(), Error> {
     let validate_account_timer = Instant::now();
     let account_validator = AccountValidator {};
     account_validator
-        .verify(&user_account, &valid_asset_ids)
+        .verify(&ordered_user_account_tx.account_tx, &valid_asset_ids)
         .map_err(|error| Error::LibraryError { error })?;
 
     timing!(
@@ -353,12 +367,16 @@ pub fn validate_account(db_dir: PathBuf, account_id: u32) -> Result<(), Error> {
 
     // On success save the public account as validated.
     let save_objects_timer = Instant::now();
+    let ordered_account = OrderedPubAccount {
+        pub_account: ordered_user_account_tx.account_tx.content.pub_account,
+        last_processed_tx_counter: Some(tx_id),
+    };
     save_object(
         db_dir,
         ON_CHAIN_DIR,
         &user,
         &user_public_account_file(&ticker),
-        &user_account,
+        &ordered_account,
     )?;
 
     timing!(
@@ -372,7 +390,7 @@ pub fn validate_account(db_dir: PathBuf, account_id: u32) -> Result<(), Error> {
 }
 
 fn process_transaction(
-    instruction: CTXInstruction,
+    instruction: TransferInstruction,
     sender_pub_account: PubAccount,
     receiver_pub_account: PubAccount,
     mdtr_account: &AccountMemo,
@@ -438,9 +456,9 @@ pub fn validate_transaction(
         "Validating asset transfer{{tx_id: {}, sender: {}, receiver: {}, ticker:{}, mediator: {}}}",
         tx_id, sender, receiver, ticker, mediator
     );
-    let state = TxState::Justification(TxSubstate::Started);
+    let state = TransferTxState::Justification(TxSubstate::Started);
 
-    let mut instruction: CTXInstruction = match load_object(
+    let mut instruction: TransferInstruction = match load_object(
         db_dir.clone(),
         ON_CHAIN_DIR,
         COMMON_OBJECTS_DIR,
@@ -472,7 +490,7 @@ pub fn validate_transaction(
         Ok(ok) => ok,
     };
 
-    let sender_account: PubAccount = match load_object(
+    let sender_ordered_pub_account: OrderedPubAccount = match load_object(
         db_dir.clone(),
         ON_CHAIN_DIR,
         &sender,
@@ -488,7 +506,7 @@ pub fn validate_transaction(
         Ok(ok) => ok,
     };
 
-    let receiver_account: PubAccount = match load_object(
+    let receiver_ordered_pub_account: OrderedPubAccount = match load_object(
         db_dir.clone(),
         ON_CHAIN_DIR,
         &receiver,
@@ -514,8 +532,8 @@ pub fn validate_transaction(
     let validate_transaction_timer = Instant::now();
     let (_, _) = match process_transaction(
         instruction.clone(),
-        sender_account,
-        receiver_account,
+        sender_ordered_pub_account.pub_account,
+        receiver_ordered_pub_account.pub_account,
         &mediator_account,
         pending_balance,
     ) {
@@ -538,7 +556,7 @@ pub fn validate_transaction(
 
     let save_objects_timer = Instant::now();
     // Save the transaction under the new state.
-    instruction.state = TxState::Justification(TxSubstate::Validated);
+    instruction.state = TransferTxState::Justification(TxSubstate::Validated);
     if let Err(error) = save_object(
         db_dir.clone(),
         ON_CHAIN_DIR,

@@ -137,10 +137,13 @@ pub enum Error {
 
     /// Last processed tx error.
     #[fail(
-        display = "Last processed tx counter in the transaction cannot be less than the last processed tx counter in the account. Want {} > {}",
+        display = "Last processed tx counter in the transaction cannot be less than the last processed tx counter in the account. Want {:?} > {:?}",
         current, earliest
     )]
-    MismatchInProcessedCounter { current: i32, earliest: i32 },
+    MismatchInProcessedCounter {
+        current: Option<u32>,
+        earliest: Option<u32>,
+    },
 
     /// Last processed tx counter should not be less than -1
     #[fail(
