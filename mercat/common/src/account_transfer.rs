@@ -81,7 +81,6 @@ pub fn process_create_tx(
         sender.clone(),
         last_processed_tx_counter,
         tx_id,
-        tx_id,
         db_dir.clone(),
     )?;
 
@@ -144,7 +143,7 @@ pub fn process_create_tx(
     let ordering_state = OrderingState {
         last_processed_tx_counter: sender_ordered_pub_account.last_processed_tx_counter,
         last_pending_tx_counter: next_pending_tx_counter,
-        current_tx_id: tx_id,
+        tx_id,
     };
     timing!("account.create_tx.create", create_tx_timer, Instant::now());
 
@@ -253,7 +252,6 @@ pub fn process_finalize_tx(
         receiver,
         receiver_ordered_pub_account.last_processed_tx_counter,
         tx_id,
-        tx_id,
         db_dir.clone(),
     )?;
     let next_pending_tx_counter = ordering_state.last_pending_tx_counter + 1;
@@ -300,7 +298,7 @@ pub fn process_finalize_tx(
     let ordering_state = OrderingState {
         last_processed_tx_counter: receiver_ordered_pub_account.last_processed_tx_counter,
         last_pending_tx_counter: next_pending_tx_counter,
-        current_tx_id: tx_id,
+        tx_id,
     };
 
     if cheat && cheating_strategy == 1 {

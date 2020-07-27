@@ -178,7 +178,7 @@ impl ValidationResult {
 pub struct OrderingState {
     pub last_processed_tx_counter: Option<u32>,
     pub last_pending_tx_counter: u32,
-    pub current_tx_id: u32,
+    pub tx_id: u32,
 }
 
 impl OrderingState {
@@ -186,7 +186,7 @@ impl OrderingState {
         Self {
             last_processed_tx_counter: None,
             last_pending_tx_counter: 0,
-            current_tx_id: tx_id,
+            tx_id: tx_id,
         }
     }
 }
@@ -600,7 +600,6 @@ pub fn last_ordering_state_before(
     user: String,
     last_processed_tx_counter_from_account: Option<u32>,
     current_tx_id: u32,
-    max_tx_id: u32, // TODO seems like it is always the same as current_tx_id
     db_dir: PathBuf,
 ) -> Result<OrderingState, Error> {
     let all_tx_files = all_unverified_tx_files(db_dir)?;
@@ -612,7 +611,7 @@ pub fn last_ordering_state_before(
             // keep only the files that are created for the current user
             res.as_ref().map_or_else(
                 |_| false,
-                |(tx_id, tx_user, _, _)| tx_user == &user && tx_id < &max_tx_id,
+                |(tx_id, tx_user, _, _)| tx_user == &user && tx_id < &current_tx_id,
             )
         })
         .map(|res| {
@@ -665,14 +664,14 @@ pub fn last_ordering_state_before(
         return Ok(OrderingState {
             last_processed_tx_counter: last_processed_tx_counter_from_account,
             last_pending_tx_counter: last_processed_tx_counter_from_account.unwrap_or_default(),
-            current_tx_id,
+            tx_id: current_tx_id,
         });
         //return Err(Error::LastTransactionNotFound { user });
     }
     Ok(OrderingState {
         last_processed_tx_counter,
         last_pending_tx_counter: last_pending_tx_counter.unwrap_or_default(),
-        current_tx_id,
+        tx_id: current_tx_id,
     })
 }
 

@@ -73,7 +73,6 @@ pub fn process_issue_asset(
         issuer.clone(),
         issuer_ordered_pub_account.last_processed_tx_counter,
         tx_id,
-        tx_id,
         db_dir.clone(),
     )?;
     let next_pending_tx_counter = ordering_state.last_pending_tx_counter + 1;
@@ -121,7 +120,7 @@ pub fn process_issue_asset(
     let ordering_state = OrderingState {
         last_processed_tx_counter: issuer_ordered_pub_account.last_processed_tx_counter,
         last_pending_tx_counter: next_pending_tx_counter,
-        current_tx_id: tx_id,
+        tx_id,
     };
 
     if cheat && cheating_strategy == 1 {

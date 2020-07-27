@@ -69,7 +69,6 @@ pub fn validate_all_pending(db_dir: PathBuf) -> Result<(), Error> {
                     sender.clone(),
                     sender_ordered_pub_account.last_processed_tx_counter,
                     tx_id,
-                    tx_id, //TODO
                     db_dir.clone(),
                 )?;
                 let pending_balance = compute_enc_pending_balance(

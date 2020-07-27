@@ -315,7 +315,6 @@ pub fn justify_asset_transfer_transaction(
         sender.clone(),
         last_processed_tx_counter,
         tx_id,
-        tx_id,
         db_dir.clone(),
     )?;
 
