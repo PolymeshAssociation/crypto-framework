@@ -14,7 +14,7 @@ mediators:
 transactions:
   - sequence:
     - validate
-    - Alice(cheat) 10 ACME Mike approve
+    - issue Alice(cheat) 10 ACME Mike approve
     - validate
 
 outcome: 

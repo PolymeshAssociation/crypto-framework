@@ -16,9 +16,9 @@ mediators:
 transactions:
   - sequence:
     - validate
-    - Alice 50 ACME Mike approve
+    - issue Alice 50 ACME Mike approve
     - validate
-    - Alice 30 ACME Bob(cheat) approve Mike approve
+    - transfer Alice 30 ACME Bob(cheat) approve Mike approve
     - validate
 
 outcome: 

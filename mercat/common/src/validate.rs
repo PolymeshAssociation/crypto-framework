@@ -97,7 +97,7 @@ pub fn validate_all_pending(db_dir: PathBuf) -> Result<(), Error> {
                 match validate_account(db_dir.clone(), account_tx.content.pub_account.id) {
                     Err(error) => {
                         error!("Error in validation of tx-{}: {:#?}", tx_id, error);
-                        info!("tx-{}: Ignoring the validation error and continuing the with rest of the validations.", tx_id);
+                        error!("tx-{}: Ignoring the validation error and continuing the with rest of the validations.", tx_id);
                     }
                     Ok(_) => (),
                 };

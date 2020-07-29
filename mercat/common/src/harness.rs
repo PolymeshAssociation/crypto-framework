@@ -91,9 +91,9 @@ impl TryFrom<(u32, String)> for Transfer {
     type Error = Error;
     fn try_from(pair: (u32, String)) -> Result<Self, Error> {
         let (tx_id, segment) = pair;
-        // Example: Bob(cheat) 40 ACME Carol approve Marry reject
+        // Example: transfer Bob(cheat) 40 ACME Carol approve Marry reject
         let re = Regex::new(
-            r"^([a-zA-Z0-9()]+) ([0-9]+) ([a-zA-Z0-9]+) ([a-zA-Z0-9()]+) (approve|reject) ([a-zA-Z0-9()]+) (approve|reject)$",
+            r"^transfer ([a-zA-Z0-9()]+) ([0-9]+) ([a-zA-Z0-9]+) ([a-zA-Z0-9()]+) (approve|reject) ([a-zA-Z0-9()]+) (approve|reject)$",
         )
         .map_err(|_| Error::RegexError {
             reason: String::from("Failed to compile the Transfer regex"),
@@ -143,9 +143,9 @@ impl TryFrom<(u32, String)> for Issue {
     type Error = Error;
     fn try_from(pair: (u32, String)) -> Result<Self, Error> {
         let (tx_id, segment) = pair;
-        // Example: Bob(cheat) 40 ACME Carol approve Marry reject
+        // Example: issue Bob(cheat) 40 ACME Carol approve Marry reject
         let re = Regex::new(
-            r"^([a-zA-Z0-9()]+) ([0-9]+) ([a-zA-Z0-9]+) ([a-zA-Z0-9()]+) (approve|reject)$",
+            r"^issue ([a-zA-Z0-9()]+) ([0-9]+) ([a-zA-Z0-9]+) ([a-zA-Z0-9()]+) (approve|reject)$",
         )
         .map_err(|_| Error::RegexError {
             reason: String::from("Failed to compile the Issue regex"),
@@ -609,7 +609,7 @@ impl TestCase {
             match transaction() {
                 Err(error) => {
                     error!("Error in transaction: {:#?}", error);
-                    info!("Ignoring the error and continuing with the rest of the transactions.");
+                    error!("Ignoring the error and continuing with the rest of the transactions.");
                 }
                 Ok(_) => info!("Success!"),
             }
