@@ -118,7 +118,7 @@ pub enum Error {
 
     /// Could not find account id in the validators local map.
     #[fail(
-        display = "Could not find account id {} in the validators local map.",
+        display = "Could not find account id {} in the validator's local map.",
         account_id
     )]
     AccountIdNotFound { account_id: u32 },

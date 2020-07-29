@@ -45,6 +45,9 @@ pub const COMMON_OBJECTS_DIR: &str = "common";
 pub const USER_ACCOUNT_MAP: &str = "user_ticker_to_account_id.json";
 pub const LAST_VALIDATED_TX_ID_FILE: &str = "last_validated_tx_id_file.json";
 
+/// A wrapper around MERCAT api which holds the transaction data, the transaction id,
+/// and the user who initiated the transaction. Some transactions also hold the
+/// ordering state.
 #[derive(Debug)]
 pub enum CoreTransaction {
     Account {
@@ -84,6 +87,7 @@ pub enum CoreTransaction {
 }
 
 impl CoreTransaction {
+    /// Returns true for transactions that can be verified by the network validators.
     fn is_ready_for_validation(&self) -> bool {
         match self {
             CoreTransaction::Account {
@@ -105,6 +109,7 @@ impl CoreTransaction {
         }
     }
 
+    /// Returns true for outgoing transactions.
     fn decreases_account_balance(&self) -> bool {
         match self {
             CoreTransaction::TransferInit {
@@ -153,6 +158,7 @@ pub enum Direction {
     Outgoing,
 }
 
+/// A wrapper that hides the validation error and only keeps the result of the validation.
 #[derive(Clone)]
 pub struct ValidationResult {
     user: String,
@@ -162,6 +168,7 @@ pub struct ValidationResult {
 }
 
 impl ValidationResult {
+    /// Creates the error value. An amount of None, indicates that an error has occurred.
     fn error(user: &str, ticker: &str) -> Self {
         Self {
             user: user.to_string(),
@@ -172,6 +179,7 @@ impl ValidationResult {
     }
 }
 
+/// Used in processing of pending transactions.
 #[derive(Debug, Serialize, Deserialize, Encode, Decode, Clone)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "std", derive(Debug))]
@@ -191,12 +199,15 @@ impl OrderingState {
     }
 }
 
+/// A wrapper around the MERCAT PubAccount that stores the last processed transaction counter
+/// of the owner of the account, at the time of updating the account.
 #[derive(Debug, Serialize, Deserialize, Encode, Decode, Clone)]
 pub struct OrderedPubAccount {
     pub last_processed_tx_counter: Option<u32>,
     pub pub_account: PubAccount,
 }
 
+/// A wrapper around the MERCAT PubAccount that stores the ordering state of this transaction.
 #[derive(Debug, Serialize, Deserialize, Encode, Decode, Clone)]
 pub struct OrderedPubAccountTx {
     pub ordering_state: OrderingState,
@@ -262,6 +273,7 @@ pub fn user_secret_account_file(ticker: &String) -> String {
     format!("{}_{}", ticker, SECRET_ACCOUNT_FILE)
 }
 
+/// Parses the transaction file name and returns: (tx_id, user_name, state, the_input_file_path).
 #[inline]
 pub fn parse_tx_name(tx_file_path: String) -> Result<(u32, String, String, String), Error> {
     let re = Regex::new(r"^tx_([0-9]+)_([a-z]+)_([a-zA-Z-#]+).json$").map_err(|_| {
@@ -288,6 +300,7 @@ pub fn parse_tx_name(tx_file_path: String) -> Result<(u32, String, String, Strin
     Ok((tx_id, user, state, tx_file_path))
 }
 
+// -------------------------------------- Metric recording ------------------------------------------------
 #[allow(dead_code)]
 static RECORDER: PrintRecorder = PrintRecorder;
 
@@ -328,6 +341,8 @@ pub fn init_print_logger() {
     metrics::set_recorder(&RECORDER).unwrap()
 }
 
+// -------------------------------------- Metric recording ------------------------------------------------
+
 /// Utility function to construct the path based user name, file name, and whether the file
 /// should be stored on or off chain.
 #[inline]
@@ -356,7 +371,7 @@ where
     file_path.push(on_off_chain);
     file_path.push(user);
 
-    // file_path is now the path to the user directory. Create it if it does not exist.
+    // The file_path is now the path to the user directory. Create it if it does not exist.
     create_dir_all(file_path.clone()).map_err(|error| Error::FileCreationError {
         error,
         path: file_path.clone(),
@@ -448,7 +463,7 @@ pub fn save_object<T: Encode>(
     file_path.push(on_off_chain);
     file_path.push(user);
 
-    // file_path is now the path to the user directory. Create it if it does not exist.
+    // The file_path is now the path to the user directory. Create it if it does not exist.
     create_dir_all(file_path.clone()).map_err(|error| Error::FileCreationError {
         error,
         path: file_path.clone(),
@@ -538,6 +553,8 @@ pub fn create_rng_from_seed(seed: Option<String>) -> Result<StdRng, Error> {
     Ok(StdRng::from_seed(seed))
 }
 
+/// Uses the default hasher to hash the input object to an integer.
+#[inline]
 fn simple_hasher<T>(obj: T) -> u64
 where
     T: Hash,
@@ -554,6 +571,7 @@ pub fn calc_account_id(user: String, ticker: String) -> u32 {
     u32::try_from(u32_val).unwrap_or_default()
 }
 
+/// Reads the account mapping from disk. Returns a map of account id to (user_name, ticker, tx_id).
 #[inline]
 pub fn load_account_map(db_dir: PathBuf) -> HashMap<u32, (String, String, u32)> {
     let mapping: Result<HashMap<u32, (String, String, u32)>, Error> =
@@ -564,6 +582,7 @@ pub fn load_account_map(db_dir: PathBuf) -> HashMap<u32, (String, String, u32)> 
     }
 }
 
+/// Updates the account mapping file with a new record.
 #[inline]
 pub fn update_account_map(
     db_dir: PathBuf,
@@ -583,6 +602,7 @@ pub fn update_account_map(
     )
 }
 
+/// Reads the account mapping file and returns (user_name, ticker, tx_id) of the given account id.
 #[inline]
 pub fn get_user_ticker_from(
     account_id: u32,
@@ -595,8 +615,10 @@ pub fn get_user_ticker_from(
     Ok((user.clone(), ticker.clone(), tx_id.clone()))
 }
 
+/// Searches the on-chain transactions to find the last transaction that the give user has submitted
+/// before `current_tx_id`. If such a transaction is found, its ordering state is returned.
 #[inline]
-pub fn last_ordering_state_before(
+pub fn last_ordering_state(
     user: String,
     last_processed_tx_counter_from_account: Option<u32>,
     current_tx_id: u32,
@@ -606,26 +628,26 @@ pub fn last_ordering_state_before(
 
     let parsed: (Option<Error>, Option<u32>, Option<u32>, CoreTransaction) = all_tx_files
         .into_iter()
-        .map(|tx| parse_tx_name(tx)) // extract info from file name
+        .map(|tx| parse_tx_name(tx)) // Extract info from file name.
         .filter(|res| {
-            // keep only the files that are created for the current user
+            // Keep only the files that are created for the current user.
             res.as_ref().map_or_else(
                 |_| false,
                 |(tx_id, tx_user, _, _)| tx_user == &user && tx_id < &current_tx_id,
             )
         })
         .map(|res| {
-            // convert the files into tx objects
+            // Convert the files into tx objects.
             res.map(|(tx_id, user, state, tx_file_path)| {
                 load_tx_file(tx_id, user, state, tx_file_path)
-                    .map_or_else(|_| CoreTransaction::Invalid, |tx| tx) // remove Result
+                    .map_or_else(|_| CoreTransaction::Invalid, |tx| tx) // Remove Result.
             })
         })
         .fold(
             (None, None, None, CoreTransaction::Invalid),
-            // closure of the fold operator.
+            // Closure of the fold operator.
             |acc, tx| {
-                // find the last transaction by comparing the last pending transaction value of each tx.
+                // Find the last transaction by comparing the last pending transaction value of each tx.
                 let (prev_error, last_processed, max_pending, last_tx) = acc;
                 match tx {
                     Err(error) => {
@@ -666,7 +688,6 @@ pub fn last_ordering_state_before(
             last_pending_tx_counter: last_processed_tx_counter_from_account.unwrap_or_default(),
             tx_id: current_tx_id,
         });
-        //return Err(Error::LastTransactionNotFound { user });
     }
     Ok(OrderingState {
         last_processed_tx_counter,
@@ -675,8 +696,10 @@ pub fn last_ordering_state_before(
     })
 }
 
+/// Searches the chain for the transactions of the given user, whose pending transaction counter is
+/// between `start` and `end`.
 #[inline]
-pub fn load_tx_between_counters_for_user(
+pub fn load_tx_between_counters(
     user: &String,
     db_dir: PathBuf,
     start: u32,
@@ -686,19 +709,19 @@ pub fn load_tx_between_counters_for_user(
         .into_iter()
         .map(|tx| parse_tx_name(tx))
         .filter(|res| {
-            // keep only the files that are created for the current user
+            // keep only the files that are created for the current user.
             res.as_ref()
                 .map_or_else(|_| false, |(_, tx_user, _, _)| tx_user == user)
         })
         .map(|res| {
-            // convert the files into tx objects
+            // Convert the files into tx objects.
             res.map(|(tx_id, user, state, tx_file_path)| {
                 load_tx_file(tx_id, user, state, tx_file_path)
-                    .map_or_else(|_| CoreTransaction::Invalid, |tx| tx) // remove Result
+                    .map_or_else(|_| CoreTransaction::Invalid, |tx| tx) // Remove Result.
             })
         })
         .filter(|res| {
-            // keep only the transactions that are created between `start` and `end`
+            // Keep only the transactions that are created between `start` and `end`.
             res.as_ref().map_or_else(
                 |_| false,
                 |tx| {
@@ -710,11 +733,13 @@ pub fn load_tx_between_counters_for_user(
         .collect()
 }
 
+/// Searches the on-chain data for all pending transactions that decreased the balance of the
+/// given user and computes the pending balance.
 #[inline]
 pub fn compute_enc_pending_balance(
     sender: &String,
-    ordering_state: OrderingState, // The state at the time of creating the last transaction
-    last_processed_tx_counter: Option<u32>, // The current last processed tx counter
+    ordering_state: OrderingState, // The state at the time of creating the last transaction.
+    last_processed_tx_counter: Option<u32>, // The current last processed tx counter.
     enc_balance_in_account: EncryptedAmount,
     db_dir: PathBuf,
 ) -> Result<EncryptedAmount, Error> {
@@ -728,7 +753,7 @@ pub fn compute_enc_pending_balance(
     if let Some(counter) = ordering_state.last_processed_tx_counter {
         start = counter + 1;
     }
-    let transfer_inits = load_tx_between_counters_for_user(
+    let transfer_inits = load_tx_between_counters(
         sender,
         db_dir.clone(),
         start,
@@ -743,7 +768,7 @@ pub fn compute_enc_pending_balance(
         transfer_inits.len()
     );
     if transfer_inits.len() == 0 {
-        // There are no pending transactions
+        // There are no pending transactions.
         return Ok(enc_balance_in_account);
     }
 
@@ -784,6 +809,7 @@ pub fn compute_enc_pending_balance(
     Ok(pending_balance)
 }
 
+/// Searches the on-chain data and returns all the transactions since the last verification.
 pub fn all_unverified_tx_files(db_dir: PathBuf) -> Result<Vec<String>, Error> {
     let start = last_verified_tx_id(db_dir.clone());
     let mut dir = db_dir.clone();
@@ -830,6 +856,8 @@ pub fn all_unverified_tx_files(db_dir: PathBuf) -> Result<Vec<String>, Error> {
     Ok(files)
 }
 
+/// Loads the tx_id of the last verified transaction from an off-chain file.
+#[inline]
 pub fn last_verified_tx_id(db_dir: PathBuf) -> i32 {
     // The file and updated after verification is done.
     let last_verified: Result<i32, Error> = load_from_file(
@@ -844,6 +872,8 @@ pub fn last_verified_tx_id(db_dir: PathBuf) -> i32 {
     }
 }
 
+/// Reads a transaction file and returns the corresponding object.
+#[inline]
 pub fn load_tx_file(
     tx_id: u32,
     user: String,

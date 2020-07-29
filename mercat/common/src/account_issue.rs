@@ -1,8 +1,8 @@
 use crate::{
-    asset_transaction_file, create_rng_from_seed, errors::Error, last_ordering_state_before,
-    load_object, save_object, user_public_account_file, user_secret_account_file,
-    OrderedAssetInstruction, OrderedPubAccount, OrderingState, COMMON_OBJECTS_DIR,
-    MEDIATOR_PUBLIC_ACCOUNT_FILE, OFF_CHAIN_DIR, ON_CHAIN_DIR,
+    asset_transaction_file, create_rng_from_seed, errors::Error, last_ordering_state, load_object,
+    save_object, user_public_account_file, user_secret_account_file, OrderedAssetInstruction,
+    OrderedPubAccount, OrderingState, COMMON_OBJECTS_DIR, MEDIATOR_PUBLIC_ACCOUNT_FILE,
+    OFF_CHAIN_DIR, ON_CHAIN_DIR,
 };
 use codec::Encode;
 use cryptography::{
@@ -69,7 +69,7 @@ pub fn process_issue_asset(
 
     // Calculate the pending
     let calc_pending_state_timer = Instant::now();
-    let ordering_state = last_ordering_state_before(
+    let ordering_state = last_ordering_state(
         issuer.clone(),
         issuer_ordered_pub_account.last_processed_tx_counter,
         tx_id,

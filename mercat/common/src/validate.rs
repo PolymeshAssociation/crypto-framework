@@ -1,7 +1,7 @@
 use crate::{
     account_create_transaction_file, all_unverified_tx_files, asset_transaction_file,
     compute_enc_pending_balance, confidential_transaction_file, debug_decrypt, errors::Error,
-    get_asset_ids, get_user_ticker_from, last_ordering_state_before, load_object, load_tx_file,
+    get_asset_ids, get_user_ticker_from, last_ordering_state, load_object, load_tx_file,
     parse_tx_name, save_object, save_to_file, user_public_account_file, AssetInstruction,
     CoreTransaction, Direction, OrderedPubAccount, OrderedPubAccountTx, TransferInstruction,
     ValidationResult, COMMON_OBJECTS_DIR, LAST_VALIDATED_TX_ID_FILE, MEDIATOR_PUBLIC_ACCOUNT_FILE,
@@ -65,7 +65,7 @@ pub fn validate_all_pending(db_dir: PathBuf) -> Result<(), Error> {
                     &sender,
                     &user_public_account_file(&ticker),
                 )?;
-                let ordering_state = last_ordering_state_before(
+                let ordering_state = last_ordering_state(
                     sender.clone(),
                     sender_ordered_pub_account.last_processed_tx_counter,
                     tx_id,

@@ -1,6 +1,6 @@
 use crate::{
     compute_enc_pending_balance, confidential_transaction_file, construct_path,
-    create_rng_from_seed, debug_decrypt, errors::Error, last_ordering_state_before, load_object,
+    create_rng_from_seed, debug_decrypt, errors::Error, last_ordering_state, load_object,
     save_object, user_public_account_file, user_secret_account_file, OrderedPubAccount,
     OrderedTransferInstruction, OrderingState, COMMON_OBJECTS_DIR, MEDIATOR_PUBLIC_ACCOUNT_FILE,
     OFF_CHAIN_DIR, ON_CHAIN_DIR,
@@ -77,7 +77,7 @@ pub fn process_create_tx(
     let calc_pending_state_timer = Instant::now();
     let last_processed_tx_counter = sender_ordered_pub_account.last_processed_tx_counter;
     let last_processed_account_balance = sender_account.pblc.enc_balance;
-    let ordering_state = last_ordering_state_before(
+    let ordering_state = last_ordering_state(
         sender.clone(),
         last_processed_tx_counter,
         tx_id,
@@ -248,7 +248,7 @@ pub fn process_finalize_tx(
 
     // Calculate the pending
     let calc_pending_state_timer = Instant::now();
-    let ordering_state = last_ordering_state_before(
+    let ordering_state = last_ordering_state(
         receiver,
         receiver_ordered_pub_account.last_processed_tx_counter,
         tx_id,

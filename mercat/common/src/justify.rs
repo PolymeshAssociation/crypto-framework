@@ -1,6 +1,6 @@
 use crate::{
     asset_transaction_file, compute_enc_pending_balance, confidential_transaction_file,
-    construct_path, create_rng_from_seed, errors::Error, last_ordering_state_before, load_object,
+    construct_path, create_rng_from_seed, errors::Error, last_ordering_state, load_object,
     save_object, user_public_account_file, AssetInstruction, OrderedAssetInstruction,
     OrderedPubAccount, OrderedTransferInstruction, TransferInstruction, COMMON_OBJECTS_DIR,
     MEDIATOR_PUBLIC_ACCOUNT_FILE, OFF_CHAIN_DIR, ON_CHAIN_DIR, SECRET_ACCOUNT_FILE,
@@ -311,7 +311,7 @@ pub fn justify_asset_transfer_transaction(
     // Calculate the pending
     let last_processed_tx_counter = sender_ordered_pub_account.last_processed_tx_counter;
     let last_processed_account_balance = sender_ordered_pub_account.pub_account.enc_balance;
-    let ordering_state = last_ordering_state_before(
+    let ordering_state = last_ordering_state(
         sender.clone(),
         last_processed_tx_counter,
         tx_id,
