@@ -124,10 +124,5 @@ outcome:
 
 ```
 
-
-
 [scenario]: https://github.com/PolymathNetwork/crypto-framework/tree/master/mercat/common/scenarios/unittest
 [sample]: https://github.com/PolymathNetwork/crypto-framework/tree/master/mercat/common/scenarios/unittest/node/multiple_pending_sequence.yml
-
-
-
