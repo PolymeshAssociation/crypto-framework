@@ -3,7 +3,7 @@
 This repository contains the CLI and test harness around the [Polymesh Cryptograph library][cryptography].
 
 The repository has following sections:
-- CLI for simple Zero-Knowledge Proofs: see [agui][agui]
+- CLI for claim proofs library: see [agui][agui]
 - CLI for sending receiving confidential transactions: see [mercat][mercat] for a detailed description.
 - Test harness for the confidential transactions: see [mercat/common][harness] for a detailed description.
 
