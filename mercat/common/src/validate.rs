@@ -109,8 +109,7 @@ pub fn validate_all_pending(db_dir: PathBuf) -> Result<(), Error> {
         }
     }
 
-    // TODO: the following loops are stupid, a much more efficient implementation is using HashMaps, but I could not make it work in Rust!!!
-    // To be discussed and fixed in this PR!
+    // TODO: CRYP-134, use a more elegant way of writing the following code.
 
     // find all users
     let mut users: Vec<String> = vec![];
