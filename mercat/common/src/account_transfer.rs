@@ -8,7 +8,7 @@ use crate::{
 use codec::{Decode, Encode};
 use cryptography::mercat::{
     transaction::{CtxReceiver, CtxSender},
-    Account, AccountMemo, InitializedTransferTx, TransferTransactionReceiver,
+    Account, AccountMemo, InitializedTransferTx, PubAccount, TransferTransactionReceiver,
     TransferTransactionSender, TransferTxState, TxSubstate,
 };
 use lazy_static::lazy_static;
@@ -127,13 +127,21 @@ pub fn process_create_tx(
     // Initialize the transaction.
     let create_tx_timer = Instant::now();
     let ctx_sender = CtxSender {};
+    let pending_account = Account {
+        scrt: sender_account.scrt,
+        pblc: PubAccount {
+            id: sender_account.pblc.id,
+            enc_asset_id: sender_account.pblc.enc_asset_id,
+            enc_balance: pending_balance,
+            memo: sender_account.pblc.memo,
+        },
+    };
     let mut asset_tx = ctx_sender
         .create_transaction(
             tx_id,
-            &sender_account,
+            &pending_account,
             &receiver_account.pub_account,
             &mediator_account.owner_enc_pub_key,
-            pending_balance,
             &[],
             amount,
             &mut rng,
@@ -150,11 +158,14 @@ pub fn process_create_tx(
     if cheat && cheating_strategy == 1 {
         info!(
             "CLI log: tx-{}: Cheating by changing the sender's account id. Correct account id: {}",
-            tx_id, sender_account.pblc.id
+            tx_id, pending_account.pblc.id
         );
         asset_tx.content.memo.sndr_account_id += 1;
         let message = asset_tx.content.encode();
-        asset_tx.sig = sender_account.scrt.sign_keys.sign(SIG_CTXT.bytes(&message));
+        asset_tx.sig = pending_account
+            .scrt
+            .sign_keys
+            .sign(SIG_CTXT.bytes(&message));
     }
 
     // Save the artifacts to file.
