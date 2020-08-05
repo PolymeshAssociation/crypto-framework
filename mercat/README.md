@@ -8,9 +8,14 @@ to [common][harness] directory.
 To use these clis, it is best to follow the following sequence of operations. First, decide on a directory
 that will serve as your blockchain storage. The path of this directory will be passed to the following CLIs.
 
+0. Prep the chain by setting the list of valid asset ids by running
+   ```bash
+   $ mercat-chain-setup # args [refer to the cli's help for the most up to date list of arguments]
+   ```
+
 1. Use account cli to create an empty account for two users by running
    ```bash
-   $ mercat-account create # args [refer to the cli's help for the most up to date list of arguments]
+   $ mercat-account create # args
    ```
 
    This will simulate the "account create transaction" on a blockchain.
