@@ -8,12 +8,12 @@ to [common][harness] directory.
 To use these clis, it is best to follow the following sequence of operations. First, decide on a directory
 that will serve as your blockchain storage. The path of this directory will be passed to the following CLIs.
 
-0. Prep the chain by setting the list of valid asset ids by running
+1. Setup the chain by specifying the list of valid ticker names.
    ```bash
-   $ mercat-chain-setup # args [refer to the cli's help for the most up to date list of arguments]
+   $ mercat-chain-setup --ticker-names ACME AAPL # args [refer to the cli's help for the most up to date list of arguments]
    ```
 
-1. Use account cli to create an empty account for two users by running
+2. Use account cli to create an empty account for two users by running
    ```bash
    $ mercat-account create # args
    ```
@@ -77,3 +77,4 @@ that will serve as your blockchain storage. The path of this directory will be p
 
 [cryptography]: https://github.com/PolymathNetwork/cryptography
 [harness]: https://github.com/PolymathNetwork/crypto-framework/tree/master/mercat/common
+
