@@ -15,7 +15,7 @@ use structopt::StructOpt;
 /// scp -- a simple claim prover.
 ///
 /// The scp utility which creates a proof for a scope-claim. The CLI will generate random content
-/// for `cdd-claim` and `scope-claim` parameters if you pass `-r` to it. Aternatively, you can
+/// for `cdd-claim` and `scope-claim` parameters if you pass `-r` to it. Alternatively, you can
 /// provide the `cdd-claim` file that you have received from CDD provider and generate your own
 /// `scope-claim` file.
 ///
@@ -27,7 +27,7 @@ use structopt::StructOpt;
 /// - message, a message that indicates a claim that an investor intends to link their DID to
 ///            a scope.{n}
 /// - proof, is the output of this CLI.
-///          It conaits a secure and private proof about the claim of the investor.
+///          It contains a secure and private proof about the claim of the investor.
 #[derive(StructOpt, Debug, Serialize, Deserialize)]
 struct Cli {
     /// Generate and use a random claim.
