@@ -1,6 +1,6 @@
 //! A simple commandline application to demonstrate a claim prover's (AKA an investor)
 //! steps to create proofs for their claims.
-//! Use `scp --help` to see the usage.
+//! Use `polymath-scp --help` to see the usage.
 //!
 
 use cli_common::Proof;
@@ -14,9 +14,9 @@ use rand_core::{CryptoRng, RngCore};
 use serde::{Deserialize, Serialize};
 use structopt::StructOpt;
 
-/// scp -- a simple claim prover.
+/// polymath-scp -- a simple claim prover.
 ///
-/// The scp utility which creates a proof for a scope-claim. The CLI will generate random content
+/// The polymath-scp utility which creates a proof for a scope-claim. The CLI will generate random content
 /// for `cdd-claim` and `scope-claim` parameters if you pass `-r` to it. Alternatively, you can
 /// provide the `cdd-claim` file that you have received from CDD provider and generate your own
 /// `scope-claim` file.
