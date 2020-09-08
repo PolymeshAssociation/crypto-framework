@@ -4,11 +4,13 @@
 //!
 
 use cli_common::Proof;
-
 use cryptography::claim_proofs::{
-    build_scope_claim_proof_data, compute_cdd_id, compute_scope_id, random_claim, ProofKeyPair,
+    build_scope_claim_proof_data, compute_cdd_id, compute_scope_id, CDDClaimData, ProofKeyPair,
+    ScopeClaimData,
 };
+use curve25519_dalek::scalar::Scalar;
 use rand::{rngs::StdRng, SeedableRng};
+use rand_core::{CryptoRng, RngCore};
 use serde::{Deserialize, Serialize};
 use structopt::StructOpt;
 
@@ -56,6 +58,20 @@ struct Cli {
     /// Be verbose.
     #[structopt(short, long)]
     verbose: bool,
+}
+
+pub fn random_claim<R: RngCore + CryptoRng>(rng: &mut R) -> (CDDClaimData, ScopeClaimData) {
+    let investor_unique_id = Scalar::random(rng);
+    (
+        CDDClaimData {
+            investor_did: Scalar::random(rng),
+            investor_unique_id,
+        },
+        ScopeClaimData {
+            scope_did: Scalar::random(rng),
+            investor_unique_id,
+        },
+    )
 }
 
 fn main() {
