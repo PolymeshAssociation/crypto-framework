@@ -8,7 +8,7 @@ use cli_common::{
     UNIQUEID_LEN,
 };
 use cryptography::claim_proofs::{
-    build_scope_claim_proof_data, compute_cdd_id, compute_scope_id, CDDClaimData, ProofKeyPair,
+    build_scope_claim_proof_data, compute_cdd_id, compute_scope_id, CddClaimData, ProofKeyPair,
     ScopeClaimData,
 };
 use curve25519_dalek::ristretto::RistrettoPoint;
@@ -23,7 +23,7 @@ pub struct CddId {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct RawCDDClaimData {
+pub struct RawCddClaimData {
     pub investor_did: InvestorDID,
     pub investor_unique_id: UniqueID,
 }
@@ -143,7 +143,7 @@ fn process_create_cdd_id(cfg: CreateCDDIdInfo) {
         let mut rng = StdRng::from_seed([42u8; 32]);
         let rand_investor_did = random_investor_did(&mut rng);
         let rand_unique_id = random_unique_id(&mut rng);
-        let raw_cdd_data = RawCDDClaimData {
+        let raw_cdd_data = RawCddClaimData {
             investor_did: rand_investor_did,
             investor_unique_id: rand_unique_id,
         };
@@ -177,7 +177,7 @@ fn process_create_cdd_id(cfg: CreateCDDIdInfo) {
         file_cdd_claim
     };
 
-    let cdd_claim = CDDClaimData::new(&raw_cdd_data.investor_did, &raw_cdd_data.investor_unique_id);
+    let cdd_claim = CddClaimData::new(&raw_cdd_data.investor_did, &raw_cdd_data.investor_unique_id);
 
     if cfg.verbose {
         println!(
@@ -209,7 +209,7 @@ fn process_create_claim_proof(cfg: CreateClaimProofInfo) {
         // let (rand_cdd_claim, rand_scope_claim) = random_claim(&mut rng);
         let rand_investor_did = random_investor_did(&mut rng);
         let rand_unique_id = random_unique_id(&mut rng);
-        let raw_cdd_data = RawCDDClaimData {
+        let raw_cdd_data = RawCddClaimData {
             investor_did: rand_investor_did,
             investor_unique_id: rand_unique_id.clone(),
         };
@@ -285,7 +285,7 @@ fn process_create_claim_proof(cfg: CreateClaimProofInfo) {
         println!("Message: {:?}", message);
     }
 
-    let cdd_claim = CDDClaimData::new(
+    let cdd_claim = CddClaimData::new(
         &raw_cdd_claim.investor_did,
         &raw_cdd_claim.investor_unique_id,
     );
