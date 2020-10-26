@@ -1,4 +1,5 @@
 [submodule "cryptography"]
 	path = cryptography
 	url = git@github.com:PolymathNetwork/cryptography.git
-	branch = CRYP-173/final_cleanups
+	branch = develop
+
