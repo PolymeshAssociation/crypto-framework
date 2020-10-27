@@ -1022,7 +1022,7 @@ pub fn debug_decrypt_base64_account_balance(
         &user_secret_account_file(&ticker),
     )?;
     scrt.enc_keys
-        .scrt
+        .secret
         .decrypt(&enc_balance)
         .map_err(|error| Error::LibraryError { error })
 }

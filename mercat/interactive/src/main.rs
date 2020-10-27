@@ -136,9 +136,8 @@ fn process_create_account(
     // Create the account.
     let secret_account = create_secret_account(&mut rng, ticker.clone())?;
 
-    let account_creator = AccountCreator {};
-    let account_tx = account_creator
-        .create(TX_ID, &secret_account, &valid_asset_ids, &mut rng)
+    let account_tx = AccountCreator
+        .create(&secret_account, &valid_asset_ids, &mut rng)
         .map_err(|error| Error::LibraryError { error })?;
 
     // Save the artifacts to file.
@@ -181,8 +180,8 @@ fn create_secret_account<R: RngCore + CryptoRng>(
     let elg_secret = ElgamalSecretKey::new(Scalar::random(rng));
     let elg_pub = elg_secret.get_public_key();
     let enc_keys = EncryptionKeys {
-        pblc: elg_pub.into(),
-        scrt: elg_secret.into(),
+        public: elg_pub.into(),
+        secret: elg_secret.into(),
     };
 
     let mut asset_id = [0u8; 12];
@@ -217,13 +216,13 @@ pub fn process_create_tx(
         &user_public_account_file(&ticker),
     )?;
     let sender_account = Account {
-        scrt: load_object(
+        secret: load_object(
             db_dir.clone(),
             OFF_CHAIN_DIR,
             &sender,
             &user_secret_account_file(&ticker),
         )?,
-        pblc: sender_ordered_pub_account.pub_account,
+        public: sender_ordered_pub_account.pub_account,
     };
 
     // Calculate the pending
@@ -243,15 +242,14 @@ pub fn process_create_tx(
     // Initialize the transaction.
     let ctx_sender = CtxSender {};
     let pending_account = Account {
-        scrt: sender_account.scrt,
-        pblc: PubAccount {
-            enc_asset_id: sender_account.pblc.enc_asset_id,
-            owner_enc_pub_key: sender_account.pblc.owner_enc_pub_key,
+        secret: sender_account.secret,
+        public: PubAccount {
+            enc_asset_id: sender_account.public.enc_asset_id,
+            owner_enc_pub_key: sender_account.public.owner_enc_pub_key,
         },
     };
     let asset_tx = ctx_sender
         .create_transaction(
-            TX_ID,
             &pending_account,
             &pending_balance,
             &receiver_pub_account,
@@ -288,13 +286,13 @@ pub fn process_finalize_tx(
     )?;
 
     let receiver_account = Account {
-        scrt: load_object(
+        secret: load_object(
             db_dir.clone(),
             OFF_CHAIN_DIR,
             &receiver,
             &user_secret_account_file(&ticker),
         )?,
-        pblc: receiver_ordered_pub_account.pub_account,
+        public: receiver_ordered_pub_account.pub_account,
     };
 
     let mut data: &[u8] = &base64::decode(&init_tx).unwrap();
@@ -303,7 +301,7 @@ pub fn process_finalize_tx(
     // Finalize the transaction.
     let receiver = CtxReceiver {};
     let asset_tx = receiver
-        .finalize_transaction(TX_ID, tx, receiver_account.clone(), amount, &mut rng)
+        .finalize_transaction(tx, receiver_account.clone(), amount, &mut rng)
         .map_err(|error| Error::LibraryError { error })?;
 
     // Save the artifacts to file.
