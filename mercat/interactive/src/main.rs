@@ -34,7 +34,7 @@ const TX_ID: u32 = 1;
 
 enum Op {
     Add,
-    Subtract
+    Subtract,
 }
 
 fn main() {
@@ -114,21 +114,10 @@ fn main() {
             )
             .unwrap()
         ),
-        CLI::Add(cfg) => info!(
-            "Result: {}",
-            add_subtract(
-                Op::Add,
-                cfg.first,
-                cfg.second,
-            )
-        ),
+        CLI::Add(cfg) => info!("Result: {}", add_subtract(Op::Add, cfg.first, cfg.second,)),
         CLI::Subtract(cfg) => info!(
             "Result: {}",
-            add_subtract(
-                Op::Subtract,
-                cfg.first,
-                cfg.second,
-            )
+            add_subtract(Op::Subtract, cfg.first, cfg.second,)
         ),
     };
     info!("The program finished successfully.");
@@ -402,7 +391,6 @@ pub fn justify_asset_transfer_transaction(
     Ok(())
 }
 
-
 fn add_subtract(op: Op, first: String, second: String) -> String {
     let mut data: &[u8] = &base64::decode(first).unwrap();
     let first = EncryptedAmount::decode(&mut data).unwrap();
@@ -414,4 +402,3 @@ fn add_subtract(op: Op, first: String, second: String) -> String {
         Op::Subtract => base64::encode((first - second).encode()),
     }
 }
-    
