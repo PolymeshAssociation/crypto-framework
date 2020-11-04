@@ -1,5 +1,5 @@
 [submodule "cryptography"]
 	path = cryptography
 	url = git@github.com:PolymathNetwork/cryptography.git
-	branch = develop
+	branch = fix-packed-simd-issue
 
