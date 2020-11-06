@@ -1,3 +1,7 @@
+# The repository has moved!
+
+You can find the new home of this repository at https://github.com/PolymathNetwork/cryptography/tree/develop/cli
+
 # crypto-framework
 
 This repository contains the CLI and test harness around the [Polymesh Cryptograph library][cryptography].
